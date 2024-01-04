@@ -1,0 +1,40 @@
+{
+  "name": "scenario-api",
+  "author": "Vivian Querenet",
+  "license": "ISC",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "build": "npx prisma generate && next build",
+    "postinstall": "prisma generate",
+    "start": "node index.js",
+    "migrate": "npx prisma db push && npx prisma db seed",
+    "lint": "echo '----- Checking Backend...' && npx prettier --debug-check . && eslint --ext .js . && echo '----- Done!'",
+    "fix": "prettier --write . && eslint --fix --ext .js ."
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.7.1",
+    "argon2": "^0.31.2",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.7",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-prettier": "^5.1.2",
+    "eslint-plugin-react": "^7.33.2",
+    "nodemon": "^3.0.2",
+    "prettier": "^3.1.1",
+    "prisma": "^5.7.1"
+  }
+}
