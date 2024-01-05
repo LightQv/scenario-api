@@ -13,12 +13,49 @@ const viewByUser = async (req, res) => {
       },
     });
 
-    if (usersViews) {
-      res.send(usersViews);
-    } else if (usersViews === null) {
+    const usersViewsCount = await prisma.view.groupBy({
+      by: ["type"],
+      where: {
+        viewerId: req.params.id,
+        AND: {
+          type: req.params.type,
+        },
+      },
+      _count: true,
+    });
+
+    if (usersViews.length > 0) {
+      res.send({ view: usersViews, count: usersViewsCount });
+    } else if (usersViews.length === 0) {
       res.send({
-        views: [],
+        view: [],
+        count: [{ _count: 0 }],
       });
+    } else throw new Error();
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
+};
+
+const countViewByYear = async (req, res) => {
+  try {
+    const countUserViewByYear = await prisma.view.groupBy({
+      by: ["release_year"],
+      where: {
+        viewerId: req.params.id,
+        AND: {
+          type: req.params.type,
+        },
+      },
+      _count: true,
+      orderBy: {
+        release_year: "asc",
+      },
+    });
+
+    if (countUserViewByYear) {
+      res.send(countUserViewByYear);
     } else throw new Error();
   } catch (err) {
     console.error(err);
@@ -52,6 +89,7 @@ const addView = async (req, res) => {
         dataId: req.body.dataId,
         poster_path: req.body.poster_path,
         release_date: req.body.release_date,
+        release_year: req.body.release_year,
         runtime: req.body.runtime,
         title: req.body.title,
         type: req.body.type,
@@ -83,4 +121,10 @@ const deleteView = async (req, res) => {
   }
 };
 
-module.exports = { viewByUser, viewRuntimeByUser, addView, deleteView };
+module.exports = {
+  viewByUser,
+  countViewByYear,
+  viewRuntimeByUser,
+  addView,
+  deleteView,
+};

@@ -32,6 +32,7 @@ model View {
   dataId       Int
   poster_path  String?
   release_date String?
+  release_year String?
   runtime      Int?
   title        String
   type         String
