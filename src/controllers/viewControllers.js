@@ -8,17 +8,17 @@ const viewByUser = async (req, res) => {
       where: {
         viewerId: req.params.id,
         AND: {
-          type: req.params.type,
+          media_type: req.params.type,
         },
       },
     });
 
     const usersViewsCount = await prisma.view.groupBy({
-      by: ["type"],
+      by: ["media_type"],
       where: {
         viewerId: req.params.id,
         AND: {
-          type: req.params.type,
+          media_type: req.params.type,
         },
       },
       _count: true,
@@ -45,7 +45,7 @@ const countViewByYear = async (req, res) => {
       where: {
         viewerId: req.params.id,
         AND: {
-          type: req.params.type,
+          media_type: req.params.type,
         },
       },
       _count: true,
@@ -86,13 +86,14 @@ const addView = async (req, res) => {
   try {
     const isViewed = await prisma.view.create({
       data: {
-        dataId: req.body.dataId,
+        tmdb_id: req.body.tmdb_id,
+        genre_ids: req.body.genre_ids,
         poster_path: req.body.poster_path,
         release_date: req.body.release_date,
         release_year: req.body.release_year,
         runtime: req.body.runtime,
         title: req.body.title,
-        type: req.body.type,
+        media_type: req.body.media_type,
         viewerId: req.body.viewerId,
       },
     });
