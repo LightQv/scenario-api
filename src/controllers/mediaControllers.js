@@ -6,12 +6,13 @@ const addMedia = async (req, res) => {
   try {
     const isCreated = await prisma.media.create({
       data: {
-        dataId: req.body.dataId,
+        tmdb_id: req.body.tmdb_id,
+        genre_ids: req.body.genre_ids,
         poster_path: req.body.poster_path,
         release_date: req.body.release_date,
         runtime: req.body.runtime,
         title: req.body.title,
-        type: req.body.type,
+        media_type: req.body.media_type,
         watchlistId: req.body.watchlistId,
       },
     });
