@@ -17,6 +17,12 @@ const watchlistByUser = async (req, res) => {
             medias: true,
           },
         },
+        medias: {
+          select: {
+            id: true,
+            tmdb_id: true,
+          },
+        },
       },
     });
     if (usersWatchlists) {
