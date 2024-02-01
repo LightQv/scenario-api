@@ -9,6 +9,7 @@ const addMedia = async (req, res) => {
         tmdb_id: req.body.tmdb_id,
         genre_ids: req.body.genre_ids,
         poster_path: req.body.poster_path,
+        backdrop_path: req.body.backdrop_path,
         release_date: req.body.release_date,
         runtime: req.body.runtime,
         title: req.body.title,

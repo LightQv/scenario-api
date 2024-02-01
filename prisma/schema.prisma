@@ -16,30 +16,32 @@ model Watchlist {
 }
 
 model Media {
-  id           String     @id @default(uuid())
-  tmdb_id      Int
-  genre_ids    Int[]      @default([0])
-  poster_path  String
-  release_date String
-  runtime      Int
-  title        String
-  media_type   String
-  watchlist    Watchlist? @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
-  watchlistId  String
+  id            String     @id @default(uuid())
+  tmdb_id       Int
+  genre_ids     Int[]      @default([0])
+  poster_path   String
+  backdrop_path String
+  release_date  String
+  runtime       Int
+  title         String
+  media_type    String
+  watchlist     Watchlist? @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  watchlistId   String
 }
 
 model View {
-  id           String @id @default(uuid())
-  tmdb_id      Int
-  genre_ids    Int[]  @default([0])
-  poster_path  String
-  release_date String
-  release_year String
-  runtime      Int
-  title        String
-  media_type   String
-  viewer       User   @relation(fields: [viewerId], references: [id], onDelete: Cascade)
-  viewerId     String
+  id            String @id @default(uuid())
+  tmdb_id       Int
+  genre_ids     Int[]  @default([0])
+  poster_path   String
+  backdrop_path String
+  release_date  String
+  release_year  String
+  runtime       Int
+  title         String
+  media_type    String
+  viewer        User   @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  viewerId      String
 }
 
 model User {
