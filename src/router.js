@@ -38,7 +38,11 @@ const {
   watchlistDetails,
   editWatchlist,
 } = require("./controllers/watchlistControllers");
-const { addMedia, deleteMedia } = require("./controllers/mediaControllers");
+const {
+  addMedia,
+  deleteMedia,
+  editMedia,
+} = require("./controllers/mediaControllers");
 
 //--- Public Routes ---//
 router.post("/api/v1/auth/register", validateUser, hashPassword, addUser);
@@ -78,6 +82,7 @@ router.delete("/api/v1/watchlist/:id", deleteWatchlist);
 
 // Media Create & Delete
 router.post("/api/v1/media", addMedia);
+router.put("/api/v1/media/:id", editMedia);
 router.delete("/api/v1/media/:id", deleteMedia);
 
 // View Create, Read & Delete

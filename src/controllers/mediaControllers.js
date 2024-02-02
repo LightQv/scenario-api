@@ -27,6 +27,26 @@ const addMedia = async (req, res) => {
   }
 };
 
+const editMedia = async (req, res) => {
+  try {
+    const isEdited = await prisma.media.update({
+      data: {
+        watchlistId: req.body.watchlistId,
+      },
+      where: {
+        id: req.params.id,
+      },
+    });
+    if (!isEdited) {
+      throw new Error();
+    }
+    res.sendStatus(204);
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
+};
+
 const deleteMedia = async (req, res) => {
   try {
     const isDelete = await prisma.media.delete({
@@ -44,5 +64,6 @@ const deleteMedia = async (req, res) => {
 
 module.exports = {
   addMedia,
+  editMedia,
   deleteMedia,
 };
