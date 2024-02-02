@@ -79,7 +79,7 @@ const addWatchlist = async (req, res) => {
 
 const editWatchlist = async (req, res) => {
   try {
-    const isCreated = await prisma.watchlist.update({
+    const isEdited = await prisma.watchlist.update({
       data: {
         title: req.body.title,
       },
@@ -87,7 +87,7 @@ const editWatchlist = async (req, res) => {
         id: req.params.id,
       },
     });
-    if (!isCreated) {
+    if (!isEdited) {
       throw new Error();
     }
     res.sendStatus(204);
