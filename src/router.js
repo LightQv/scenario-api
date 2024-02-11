@@ -30,6 +30,9 @@ const {
   deleteView,
   viewByUser,
   countViewByYear,
+  viewByType,
+  countViewByType,
+  runtimeViewByUser,
 } = require("./controllers/viewControllers");
 const {
   addWatchlist,
@@ -86,8 +89,11 @@ router.put("/api/v1/media/:id", editMedia);
 router.delete("/api/v1/media/:id", deleteMedia);
 
 // View Create, Read & Delete
+router.get("/api/v1/user/view/count/:type/:id", countViewByType);
+router.get("/api/v1/user/view/runtime/:type/:id", runtimeViewByUser);
 router.get("/api/v1/user/view/year/:type/:id", countViewByYear);
-router.get("/api/v1/user/view/:type/:id", viewByUser);
+router.get("/api/v1/user/view/:type/:id", viewByType);
+router.get("/api/v1/user/view/:id", viewByUser);
 router.post("/api/v1/view", addView);
 router.delete("/api/v1/view/:id", deleteView);
 
