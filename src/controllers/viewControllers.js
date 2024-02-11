@@ -7,13 +7,44 @@ const viewByUser = async (req, res) => {
     const usersViews = await prisma.view.findMany({
       where: {
         viewerId: req.params.id,
+      },
+    });
+
+    if (usersViews) {
+      res.send(usersViews);
+    } else throw new Error();
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
+};
+
+const viewByType = async (req, res) => {
+  try {
+    const usersViewsByType = await prisma.view.findMany({
+      where: {
+        viewerId: req.params.id,
         AND: {
           media_type: req.params.type,
+          genre_ids: {
+            has: Number(req.query.genre),
+          },
         },
       },
     });
 
-    const usersViewsCount = await prisma.view.groupBy({
+    if (usersViewsByType) {
+      res.send(usersViewsByType);
+    } else throw new Error();
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
+};
+
+const countViewByType = async (req, res) => {
+  try {
+    const countUserViewByType = await prisma.view.groupBy({
       by: ["media_type"],
       where: {
         viewerId: req.params.id,
@@ -24,13 +55,8 @@ const viewByUser = async (req, res) => {
       _count: true,
     });
 
-    if (usersViews.length > 0) {
-      res.send({ view: usersViews, count: usersViewsCount });
-    } else if (usersViews.length === 0) {
-      res.send({
-        view: [],
-        count: [{ _count: 0 }],
-      });
+    if (countUserViewByType) {
+      res.send(countUserViewByType);
     } else throw new Error();
   } catch (err) {
     console.error(err);
@@ -63,11 +89,14 @@ const countViewByYear = async (req, res) => {
   }
 };
 
-const viewRuntimeByUser = async (req, res) => {
+const runtimeViewByUser = async (req, res) => {
   try {
     const viewsRuntime = await prisma.view.findMany({
       where: {
         viewerId: req.params.id,
+        AND: {
+          media_type: req.params.type,
+        },
       },
       select: {
         runtime: true,
@@ -125,8 +154,10 @@ const deleteView = async (req, res) => {
 
 module.exports = {
   viewByUser,
+  viewByType,
+  countViewByType,
   countViewByYear,
-  viewRuntimeByUser,
+  runtimeViewByUser,
   addView,
   deleteView,
 };
