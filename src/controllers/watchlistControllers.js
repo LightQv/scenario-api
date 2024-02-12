@@ -39,19 +39,16 @@ const watchlistDetails = async (req, res) => {
     const watchlist = await prisma.watchlist.findUnique({
       where: {
         id: req.params.id,
-        AND: {
-          medias: {
-            some: {
-              genre_ids: {
-                has: Number(req.query.genre),
-              },
-            },
-          },
-        },
       },
       select: {
         title: true,
-        medias: true,
+        medias: {
+          where: {
+            genre_ids: {
+              has: Number(req.query.genre),
+            },
+          },
+        },
         _count: {
           select: {
             medias: true,
