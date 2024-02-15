@@ -18,9 +18,7 @@ const verifyPasswordTemplate = (username, token) => {
     <body
       style="
         margin: auto;
-        width: 60%;
         background-color: #ffffff;
-        padding: 5rem 8rem 5rem 8rem;
         border-radius: 1rem;
         display: flex;
         flex-direction: column;
@@ -40,33 +38,36 @@ const verifyPasswordTemplate = (username, token) => {
         <h1
           style="
             font-weight: 400;
-            font-size: 1.875rem;
+            font-size: 1.75rem;
             font-family: 'Abril Fatface', serif;
           "
         >
           Hey ${username},
         </h1>
         <h2 style="font-size: 1rem; font-weight: 400">
-          You need to change your DIWIT? password ?
+          You need to change your SCENARIO password ?
         </h2>
       </section>
       <a
         href="${FRONTEND_URL}/reset-password/${token}"
         style="
-          background-color: #adc178;
-          border-color: #adc178;
+          border: 1px solid #eab208;
           border-radius: 0.375rem;
-          padding: 1rem 2rem 1rem 2rem;
-          border-style: none;
+          padding: 0.15rem 1rem;
           text-decoration: none;
-          border-width: 1px;
-          color: #f7f5f5;
           font-weight: 600;
           font-size: 1rem;
           margin-bottom: 0.5rem;
         "
-        >RESET PASSWORD</a
-      >
+        >
+        <p
+        style="
+          color: #eab208;
+        "
+        >
+          RESET PASSWORD
+        </p>
+      </a>
       <p style="text-align: center; font-size: 1rem">
         If you did not initiate this request, please contact us immediately at
         <a
@@ -75,19 +76,20 @@ const verifyPasswordTemplate = (username, token) => {
             text-decoration-line: underline;
             text-underline-offset: 4px;
             text-decoration-thickness: 2px;
-            text-decoration-color: #adc178;
+            text-decoration-color: #eab208;
             color: black;
           "
           >${SMTP_USER}</a
         >.
       </p>
       <p style="text-align: center; font-size: 1rem">
-        Thank you,<br />The DIWIT? Team.
+        Thank you,<br />The SCENARIO's Team.
       </p>
       <img
         src="https://firebasestorage.googleapis.com/v0/b/scenario-f57d7.appspot.com/o/SCENARIO_b.png?alt=media&token=d85d80b8-3c0d-4214-a33f-accf0ed9f9ba"
         alt="logo"
-        style="align-self: center; height: 2rem"
+        style="margin: auto; aspect-ratio: initial; width: 6rem"
+        object-cover
       />
     </body>
   </html>

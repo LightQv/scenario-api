@@ -74,6 +74,7 @@ router.get("/api/v1/user/banner/:id", getUserBanner);
 router.put("/api/v1/user/:id", validateUser, hashPassword, editUser);
 router.put("/api/v1/user/banner/:id", editUserBanner);
 router.put("/api/v1/user/email/:id", editUserMail);
+router.put("/api/v1/user/password/:id", validatePw, hashPassword, editUserPw);
 router.delete("/api/v1/user/:id", deleteUser);
 
 // Watchlist CRUD

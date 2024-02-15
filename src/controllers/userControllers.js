@@ -116,7 +116,7 @@ const editUserPw = async (req, res) => {
   try {
     const isPwModified = await prisma.user.update({
       where: {
-        id: req.user.id,
+        id: req.params.id || req.user.id,
       },
       data: {
         hashedPassword: req.body.hashedPassword,

@@ -22,9 +22,9 @@ const sendForgottenPassword = (req, res) => {
     req.user.passwordToken
   );
   const mailOptions = {
-    from: SMTP_HOST,
+    from: SMTP_USER,
     to: req.user.email,
-    subject: `${req.user.username}, forgot your password ?`,
+    subject: `${req.user.username}, have you forgot your password ?`,
     text: "Click here to create a new password !",
     html: messageTemplate,
   };
