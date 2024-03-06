@@ -63,39 +63,41 @@ router.post(
   hashPassword,
   editUserPw
 );
-router.get("/auth/logout", logout);
+router.get("/api/v1/auth/logout", logout);
 
 //--- Private Routes (Require Auth) ---//
 router.use(verifyToken); /* Middleware wall to verify if the user got a Token */
 
-// User's Update & Delete
-router.get("/api/v1/user/:id", getUser);
-router.get("/api/v1/user/banner/:id", getUserBanner);
-router.put("/api/v1/user/:id", validateUser, hashPassword, editUser);
-router.put("/api/v1/user/banner/:id", editUserBanner);
-router.put("/api/v1/user/email/:id", editUserMail);
-router.put("/api/v1/user/password/:id", validatePw, hashPassword, editUserPw);
-router.delete("/api/v1/user/:id", deleteUser);
+// User's Read, Update & Delete
+router.get("/api/v1/users/:id", getUser);
+router.get("/api/v1/users/banner/:id", getUserBanner);
+router.put("/api/v1/users/:id", validateUser, hashPassword, editUser);
+router.put("/api/v1/users/banner/:id", editUserBanner);
+router.put("/api/v1/users/email/:id", editUserMail);
+router.put("/api/v1/users/password/:id", validatePw, hashPassword, editUserPw);
+router.delete("/api/v1/users/:id", deleteUser);
 
 // Watchlist CRUD
-router.get("/api/v1/user/watchlist/:id", watchlistByUser);
-router.get("/api/v1/user/watchlist/detail/:id", watchlistDetails);
-router.post("/api/v1/watchlist", addWatchlist);
-router.put("/api/v1/watchlist/:id", editWatchlist);
-router.delete("/api/v1/watchlist/:id", deleteWatchlist);
+router.get("/api/v1/watchlists/:id", watchlistByUser);
+router.get("/api/v1/watchlists/detail/:id", watchlistDetails);
+router.post("/api/v1/watchlists", addWatchlist);
+router.put("/api/v1/watchlists/:id", editWatchlist);
+router.delete("/api/v1/watchlists/:id", deleteWatchlist);
 
-// Media Create & Delete
-router.post("/api/v1/media", addMedia);
-router.put("/api/v1/media/:id", editMedia);
-router.delete("/api/v1/media/:id", deleteMedia);
+// Media Create, Update & Delete
+router.post("/api/v1/medias", addMedia);
+router.put("/api/v1/medias/:id", editMedia);
+router.delete("/api/v1/medias/:id", deleteMedia);
 
 // View Create, Read & Delete
-router.get("/api/v1/user/view/count/:type/:id", countViewByType);
-router.get("/api/v1/user/view/runtime/:type/:id", runtimeViewByUser);
-router.get("/api/v1/user/view/year/:type/:id", countViewByYear);
-router.get("/api/v1/user/view/:type/:id", viewByType);
-router.get("/api/v1/user/view/:id", viewByUser);
-router.post("/api/v1/view", addView);
-router.delete("/api/v1/view/:id", deleteView);
+router.get("/api/v1/views/:type/:id", viewByType);
+router.get("/api/v1/views/:id", viewByUser);
+router.post("/api/v1/views", addView);
+router.delete("/api/v1/views/:id", deleteView);
+
+// Statistics Read
+router.get("/api/v1/stats/count/:type/:id", countViewByType);
+router.get("/api/v1/stats/runtime/:type/:id", runtimeViewByUser);
+router.get("/api/v1/stats/year/:type/:id", countViewByYear);
 
 module.exports = router;
