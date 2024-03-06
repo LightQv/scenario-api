@@ -104,10 +104,10 @@ const editUserMail = async (req, res) => {
       res.status(404).send("User not found");
     }
   } catch (err) {
-    if (err) {
-      console.error(err);
-      res.sendStatus(500);
-    }
+    console.error(err);
+    if (err.code === "P2002") {
+      res.sendStatus(400);
+    } else res.sendStatus(500);
   }
 };
 
