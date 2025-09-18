@@ -12,7 +12,6 @@ from app.schemas import (
 )
 
 router = APIRouter(
-    prefix="/users",
     tags=["Users"],
     responses={
         404: {"description": "User not found"},

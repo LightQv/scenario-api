@@ -9,7 +9,6 @@ from app.models import User, Watchlist, Media
 from app.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse, WatchlistDetail, MediaResponse
 
 router = APIRouter(
-    prefix="/watchlists",
     tags=["Watchlists"],
     responses={
         404: {"description": "Watchlist not found"},

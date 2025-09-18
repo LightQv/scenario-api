@@ -8,7 +8,6 @@ from app.models import User, View
 from app.schemas import ViewCreate, ViewResponse
 
 router = APIRouter(
-    prefix="/views",
     tags=["Views"],
     responses={
         404: {"description": "View not found"},

@@ -7,7 +7,6 @@ from app.models import User, Media, Watchlist
 from app.schemas import MediaCreate, MediaUpdate, MediaResponse
 
 router = APIRouter(
-    prefix="/medias",
     tags=["Media"],
     responses={
         404: {"description": "Media or watchlist not found"},
