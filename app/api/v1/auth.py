@@ -10,7 +10,6 @@ from app.services.email_service import send_forgotten_password_email
 from app.core.settings import settings
 
 router = APIRouter(
-    prefix="/auth",
     tags=["Authentication"],
     responses={
         401: {"description": "Authentication failed"},

@@ -9,7 +9,6 @@ from app.models import User, Watchlist, Media
 from app.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse, WatchlistDetail, MediaResponse
 
 router = APIRouter(
-    prefix="/watchlists",
     tags=["Watchlists"],
     responses={
         404: {"description": "Watchlist not found"},
@@ -81,7 +80,7 @@ def get_user_watchlists(
 )
 def get_watchlist_details(
         watchlist_id: UUID,
-        genre: Optional[int] = Query(None, description="Filter media by genre ID"),
+        genre: Optional[str] = Query(None, description="Filter media by genre ID"),
         database_session: Session = Depends(get_database)
 ) -> WatchlistDetail:
     """
@@ -114,6 +113,7 @@ def get_watchlist_details(
 
     # Apply genre filter if specified
     if genre is not None:
+        print(genre)
         media_query = media_query.filter(Media.genre_ids.any(genre))
 
     medias = media_query.all()

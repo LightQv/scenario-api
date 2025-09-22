@@ -9,7 +9,6 @@ from app.models import View
 from app.schemas import ViewCountByType, ViewCountByYear, ViewRuntime
 
 router = APIRouter(
-    prefix="/statistics",
     tags=["Statistics"],
     responses={
         404: {"description": "No statistics found"}
