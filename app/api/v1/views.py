@@ -52,7 +52,7 @@ def get_user_views(
 def get_user_views_by_type(
         media_type: str,
         user_id: UUID,
-        genre: Optional[int] = Query(None, description="Filter by specific genre ID"),
+        genre: Optional[str] = Query(None, description="Filter by specific genre ID"),
         database_session: Session = Depends(get_database)
 ) -> List[ViewResponse]:
     """
@@ -70,14 +70,16 @@ def get_user_views_by_type(
     Returns:
         List[ViewResponse]: Filtered list of user's viewing history
     """
+    genre_id: Optional[int] = int(genre) if genre and genre.isdigit() else None
+
     query = database_session.query(View).filter(
         View.viewer_id == user_id,
         View.media_type == media_type
     )
 
     # Apply genre filter if specified
-    if genre is not None:
-        query = query.filter(View.genre_ids.any(genre))
+    if genre_id is not None:
+        query = query.filter(View.genre_ids.any(genre_id))
 
     views = query.all()
     return [ViewResponse.model_validate(view) for view in views]
