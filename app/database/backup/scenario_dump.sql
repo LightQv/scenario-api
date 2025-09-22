@@ -126,11 +126,10 @@ client_min_messages = warning;
 INSERT INTO "public"."user_model" ("id", "username", "email", "hashed_password", "password_token", "profile_banner",
                                    "created_at", "updated_at")
 VALUES ('1e00d23c-47e4-465e-8dae-8650a9440c29', 'Lubelle', 'jane.vantassel@outlook.fr',
-        '$argon2id$v=19$m=65536,t=5,p=1$+QnRGLnw10DpXhpOq0V7BA$e4LiBK2S6jffFOhBabVUTMO5fNVQrrmXIv5QUqJPSmw', NULL, NULL,
+        '$2b$12$9H2eJTZ6ve7f1VCSRtPN6ecKEI7X.r2tuhzGxbaWZ8PgmMmayb93W', NULL, NULL,
         NOW(), NOW()),
        ('ad629edd-3bc1-4caf-81e0-b45284c65041', 'LightQv', 'v.querenet@proton.me',
-        '$argon2id$v=19$m=65536,t=5,p=1$eZsPi9tukp0sENKD1EAdQg$mw8DccuhvHt7d8rJO4qRgEBHc7a0+FxOu6Ez9T3mcBc', NULL,
-        'https://firebasestorage.googleapis.com/v0/b/scenario-f57d7.appspot.com/o/profile_banner%2F54384362-485d-4616-bfb3-df3803d32874_lightqv?alt=media&token=bc9daa86-3b2a-4b63-9aa4-d99c17007eac',
+        '$2b$12$9H2eJTZ6ve7f1VCSRtPN6ecKEI7X.r2tuhzGxbaWZ8PgmMmayb93W', NULL, NULL,
         NOW(), NOW());
 
 
