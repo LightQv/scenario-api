@@ -13,15 +13,23 @@ from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
 def get_local_tables() -> List[str]:
     """Return list of tables in local DB (public schema)."""
     container_name = settings.DB_CONTAINER_NAME
     try:
         command = [
-            'docker', 'exec', container_name,
-            'psql', '-U', settings.POSTGRES_USER, '-d', settings.POSTGRES_DB,
-            '-t', '-c',
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+            "docker",
+            "exec",
+            container_name,
+            "psql",
+            "-U",
+            settings.POSTGRES_USER,
+            "-d",
+            settings.POSTGRES_DB,
+            "-t",
+            "-c",
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;",
         ]
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
@@ -31,6 +39,7 @@ def get_local_tables() -> List[str]:
     except Exception as e:
         logger.error(f"Error getting table names: {e}")
         return []
+
 
 def import_dump(dump_path: str) -> bool:
     """Import the cleaned dump into the local DB."""
@@ -42,8 +51,8 @@ def import_dump(dump_path: str) -> bool:
         return False
 
     # Copy dump into container
-    temp_file = '/tmp/supabase_import.sql'
-    copy_cmd = ['docker', 'cp', str(dump_path), f'{container_name}:{temp_file}']
+    temp_file = "/tmp/supabase_import.sql"
+    copy_cmd = ["docker", "cp", str(dump_path), f"{container_name}:{temp_file}"]
     result = subprocess.run(copy_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         logger.error(f"Failed to copy dump into container: {result.stderr}")
@@ -51,15 +60,23 @@ def import_dump(dump_path: str) -> bool:
 
     # Run import
     import_cmd = [
-        'docker', 'exec', '-i', container_name,
-        'psql', '-U', settings.POSTGRES_USER, '-d', settings.POSTGRES_DB,
-        '-f', temp_file
+        "docker",
+        "exec",
+        "-i",
+        container_name,
+        "psql",
+        "-U",
+        settings.POSTGRES_USER,
+        "-d",
+        settings.POSTGRES_DB,
+        "-f",
+        temp_file,
     ]
     logger.info("📥 Importing dump into database...")
     result = subprocess.run(import_cmd, capture_output=True, text=True)
 
     # Cleanup
-    subprocess.run(['docker', 'exec', container_name, 'rm', '-f', temp_file])
+    subprocess.run(["docker", "exec", container_name, "rm", "-f", temp_file])
 
     if result.returncode != 0:
         logger.error("Import failed:")
@@ -68,6 +85,7 @@ def import_dump(dump_path: str) -> bool:
 
     logger.info("✅ Import completed successfully")
     return True
+
 
 def main():
     print("🔄 Scenario API - Supabase Import (Cleaned)")
@@ -86,13 +104,15 @@ def main():
     logger.info(f"Local tables: {tables}")
 
     if not tables:
-        print("❌ No local tables found. Did you run migrations? (alembic upgrade head)")
+        print(
+            "❌ No local tables found. Did you run migrations? (alembic upgrade head)"
+        )
         sys.exit(1)
 
     # Confirm
     print("\nThis will import data into your existing tables:")
     print(", ".join(tables))
-    if input("Continue? (y/N): ").strip().lower() not in ['y', 'yes']:
+    if input("Continue? (y/N): ").strip().lower() not in ["y", "yes"]:
         print("Cancelled.")
         sys.exit(0)
 
@@ -103,6 +123,7 @@ def main():
     else:
         print("\n❌ Import failed.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

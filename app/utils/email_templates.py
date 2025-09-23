@@ -96,12 +96,6 @@ def get_password_reset_template(username: str, reset_token: str) -> str:
         <p style="text-align: center; font-size: 1rem">
           Thank you,<br />The SCENARIO's Team.
         </p>
-        <img
-          src="https://firebasestorage.googleapis.com/v0/b/scenario-f57d7.appspot.com/o/SCENARIO_b.png?alt=media&token=d85d80b8-3c0d-4214-a33f-accf0ed9f9ba"
-          alt="logo"
-          style="margin: auto; aspect-ratio: initial; width: 6rem"
-          object-cover
-        />
       </body>
     </html>
     """

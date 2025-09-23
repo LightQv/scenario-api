@@ -11,8 +11,8 @@ router = APIRouter(
     tags=["Views"],
     responses={
         404: {"description": "View not found"},
-        403: {"description": "Access forbidden"}
-    }
+        403: {"description": "Access forbidden"},
+    },
 )
 
 
@@ -20,11 +20,10 @@ router = APIRouter(
     "/{user_id}",
     response_model=List[ViewResponse],
     summary="Get user viewing history",
-    description="Retrieve complete viewing history for a specific user"
+    description="Retrieve complete viewing history for a specific user",
 )
 def get_user_views(
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    user_id: UUID, database_session: Session = Depends(get_database)
 ) -> List[ViewResponse]:
     """
     Get all viewing history for a user.
@@ -47,13 +46,13 @@ def get_user_views(
     "/{media_type}/{user_id}",
     response_model=List[ViewResponse],
     summary="Get filtered viewing history",
-    description="Retrieve viewing history filtered by media type and optionally by genre"
+    description="Retrieve viewing history filtered by media type and optionally by genre",
 )
 def get_user_views_by_type(
-        media_type: str,
-        user_id: UUID,
-        genre: Optional[str] = Query(None, description="Filter by specific genre ID"),
-        database_session: Session = Depends(get_database)
+    media_type: str,
+    user_id: UUID,
+    genre: Optional[str] = Query(None, description="Filter by specific genre ID"),
+    database_session: Session = Depends(get_database),
 ) -> List[ViewResponse]:
     """
     Get user viewing history filtered by media type and genre.
@@ -73,8 +72,7 @@ def get_user_views_by_type(
     genre_id: Optional[int] = int(genre) if genre and genre.isdigit() else None
 
     query = database_session.query(View).filter(
-        View.viewer_id == user_id,
-        View.media_type == media_type
+        View.viewer_id == user_id, View.media_type == media_type
     )
 
     # Apply genre filter if specified
@@ -89,12 +87,12 @@ def get_user_views_by_type(
     "/",
     status_code=status.HTTP_201_CREATED,
     summary="Mark media as watched",
-    description="Add a new viewing record for a movie or TV show"
+    description="Add a new viewing record for a movie or TV show",
 )
 def add_view(
-        view_data: ViewCreate,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    view_data: ViewCreate,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ) -> dict:
     """
     Add a new viewing record (mark media as watched).
@@ -117,7 +115,7 @@ def add_view(
     if str(view_data.viewer_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to add view for this user"
+            detail="Not authorized to add view for this user",
         )
 
     new_view = View(
@@ -130,7 +128,7 @@ def add_view(
         runtime=view_data.runtime,
         title=view_data.title,
         media_type=view_data.media_type,
-        viewer_id=view_data.viewer_id
+        viewer_id=view_data.viewer_id,
     )
 
     database_session.add(new_view)
@@ -143,12 +141,12 @@ def add_view(
     "/{view_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove viewing record",
-    description="Delete a viewing record from user's history"
+    description="Delete a viewing record from user's history",
 )
 def delete_view(
-        view_id: UUID,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    view_id: UUID,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Delete a viewing record from user's history.
@@ -170,15 +168,14 @@ def delete_view(
 
     if not view:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="View not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="View not found"
         )
 
     # Verify user owns this viewing record
     if str(view.viewer_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this view"
+            detail="Not authorized to delete this view",
         )
 
     database_session.delete(view)

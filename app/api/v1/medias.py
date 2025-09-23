@@ -4,14 +4,14 @@ from uuid import UUID
 
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, Media, Watchlist
-from app.schemas import MediaCreate, MediaUpdate, MediaResponse
+from app.schemas import MediaCreate, MediaUpdate
 
 router = APIRouter(
     tags=["Media"],
     responses={
         404: {"description": "Media or watchlist not found"},
-        403: {"description": "Access forbidden"}
-    }
+        403: {"description": "Access forbidden"},
+    },
 )
 
 
@@ -19,12 +19,12 @@ router = APIRouter(
     "/",
     status_code=status.HTTP_201_CREATED,
     summary="Add media to watchlist",
-    description="Add a movie or TV show to a specific watchlist (requires ownership)"
+    description="Add a movie or TV show to a specific watchlist (requires ownership)",
 )
 def add_media_to_watchlist(
-        media_data: MediaCreate,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    media_data: MediaCreate,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ) -> dict:
     """
     Add a media item to a watchlist.
@@ -47,20 +47,21 @@ def add_media_to_watchlist(
             - 403 if user doesn't own the watchlist
     """
     # Verify watchlist exists and belongs to user
-    watchlist = database_session.query(Watchlist).filter(
-        Watchlist.id == media_data.watchlist_id
-    ).first()
+    watchlist = (
+        database_session.query(Watchlist)
+        .filter(Watchlist.id == media_data.watchlist_id)
+        .first()
+    )
 
     if not watchlist:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Watchlist not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Watchlist not found"
         )
 
     if str(watchlist.author_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to add media to this watchlist"
+            detail="Not authorized to add media to this watchlist",
         )
 
     new_media = Media(
@@ -72,7 +73,7 @@ def add_media_to_watchlist(
         runtime=media_data.runtime,
         title=media_data.title,
         media_type=media_data.media_type,
-        watchlist_id=media_data.watchlist_id
+        watchlist_id=media_data.watchlist_id,
     )
 
     database_session.add(new_media)
@@ -85,13 +86,13 @@ def add_media_to_watchlist(
     "/{media_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update media",
-    description="Update media information or move it to another watchlist"
+    description="Update media information or move it to another watchlist",
 )
 def update_media(
-        media_id: UUID,
-        media_data: MediaUpdate,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    media_id: UUID,
+    media_data: MediaUpdate,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Update media item or move it to another watchlist.
@@ -114,31 +115,34 @@ def update_media(
 
     if not media:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
         )
 
     # Verify user owns the current watchlist
-    current_watchlist = database_session.query(Watchlist).filter(
-        Watchlist.id == media.watchlist_id
-    ).first()
+    current_watchlist = (
+        database_session.query(Watchlist)
+        .filter(Watchlist.id == media.watchlist_id)
+        .first()
+    )
 
     if str(current_watchlist.author_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this media"
+            detail="Not authorized to modify this media",
         )
 
     # If moving to a new watchlist, verify ownership of target watchlist
     if media_data.watchlist_id:
-        new_watchlist = database_session.query(Watchlist).filter(
-            Watchlist.id == media_data.watchlist_id
-        ).first()
+        new_watchlist = (
+            database_session.query(Watchlist)
+            .filter(Watchlist.id == media_data.watchlist_id)
+            .first()
+        )
 
         if not new_watchlist or str(new_watchlist.author_id) != str(current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to move media to this watchlist"
+                detail="Not authorized to move media to this watchlist",
             )
 
         media.watchlist_id = media_data.watchlist_id
@@ -150,12 +154,12 @@ def update_media(
     "/{media_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete media from watchlist",
-    description="Remove a media item from its watchlist permanently"
+    description="Remove a media item from its watchlist permanently",
 )
 def delete_media(
-        media_id: UUID,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    media_id: UUID,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Delete media item from watchlist.
@@ -177,19 +181,20 @@ def delete_media(
 
     if not media:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
         )
 
     # Verify user owns the watchlist
-    watchlist = database_session.query(Watchlist).filter(
-        Watchlist.id == media.watchlist_id
-    ).first()
+    watchlist = (
+        database_session.query(Watchlist)
+        .filter(Watchlist.id == media.watchlist_id)
+        .first()
+    )
 
     if str(watchlist.author_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this media"
+            detail="Not authorized to delete this media",
         )
 
     database_session.delete(media)

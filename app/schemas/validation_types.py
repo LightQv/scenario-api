@@ -1,6 +1,7 @@
 """
 Validation type.
 """
+
 import re
 from typing import Annotated
 
@@ -15,9 +16,7 @@ from app.services.constant.response_constant import (
     INVALID_EMAIL_ERROR,
 )
 
-EMAIL_REGEX = re.compile(
-    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-)
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 
 def email_is_valid(email: str) -> str:

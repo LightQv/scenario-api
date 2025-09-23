@@ -20,8 +20,8 @@ def get_database() -> Generator[Session, None, None]:
 
 
 def get_current_user(
-        access_token: Optional[str] = Cookie(None, alias="access_token"),
-        database_session: Session = Depends(get_database)
+    access_token: Optional[str] = Cookie(None, alias="access_token"),
+    database_session: Session = Depends(get_database),
 ) -> User:
     """
     Dependency to get the currently authenticated user from cookie.
@@ -40,14 +40,12 @@ def get_current_user(
         HTTPException: 403 if token is missing or invalid, or if user doesn't exist
     """
     credentials_exception = HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Could not validate credentials"
+        status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
     if not access_token:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access token not found"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access token not found"
         )
 
     user_id = verify_token(access_token)
@@ -61,9 +59,7 @@ def get_current_user(
     return user
 
 
-def get_current_user_id(
-        current_user: User = Depends(get_current_user)
-) -> str:
+def get_current_user_id(current_user: User = Depends(get_current_user)) -> str:
     """
     Dependency to get only the ID of the currently authenticated user.
 

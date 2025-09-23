@@ -22,9 +22,7 @@ class MediaInWatchlist(BaseModel):
     tmdb_id: int
 
     model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+        from_attributes=True, populate_by_name=True, str_strip_whitespace=True
     )
 
 
@@ -36,9 +34,7 @@ class WatchlistResponse(BaseModel):
     medias_count: int = 0
 
     model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+        from_attributes=True, populate_by_name=True, str_strip_whitespace=True
     )
 
 
@@ -48,7 +44,5 @@ class WatchlistDetail(BaseModel):
     medias_count: int = 0
 
     model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+        from_attributes=True, populate_by_name=True, str_strip_whitespace=True
     )

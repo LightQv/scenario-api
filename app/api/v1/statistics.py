@@ -9,10 +9,7 @@ from app.models import View
 from app.schemas import ViewCountByType, ViewCountByYear, ViewRuntime
 
 router = APIRouter(
-    tags=["Statistics"],
-    responses={
-        404: {"description": "No statistics found"}
-    }
+    tags=["Statistics"], responses={404: {"description": "No statistics found"}}
 )
 
 
@@ -20,12 +17,10 @@ router = APIRouter(
     "/count/{media_type}/{user_id}",
     response_model=List[ViewCountByType],
     summary="Get viewing count by media type",
-    description="Get the number of movies or TV shows watched by a user"
+    description="Get the number of movies or TV shows watched by a user",
 )
 def get_view_count_by_type(
-        media_type: str,
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    media_type: str, user_id: UUID, database_session: Session = Depends(get_database)
 ) -> List[ViewCountByType]:
     """
     Get viewing statistics by media type for a user.
@@ -41,13 +36,12 @@ def get_view_count_by_type(
     Returns:
         List[ViewCountByType]: Statistics showing count by media type
     """
-    results = database_session.query(
-        View.media_type,
-        func.count(View.id).label('count')
-    ).filter(
-        View.viewer_id == user_id,
-        View.media_type == media_type
-    ).group_by(View.media_type).all()
+    results = (
+        database_session.query(View.media_type, func.count(View.id).label("count"))
+        .filter(View.viewer_id == user_id, View.media_type == media_type)
+        .group_by(View.media_type)
+        .all()
+    )
 
     return [
         ViewCountByType(media_type=result.media_type, count=result.count)
@@ -59,12 +53,10 @@ def get_view_count_by_type(
     "/year/{media_type}/{user_id}",
     response_model=List[ViewCountByYear],
     summary="Get viewing count by release year",
-    description="Get viewing statistics grouped by media release year"
+    description="Get viewing statistics grouped by media release year",
 )
 def get_view_count_by_year(
-        media_type: str,
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    media_type: str, user_id: UUID, database_session: Session = Depends(get_database)
 ) -> List[ViewCountByYear]:
     """
     Get viewing statistics by release year for a user.
@@ -80,13 +72,13 @@ def get_view_count_by_year(
     Returns:
         List[ViewCountByYear]: Statistics showing count by release year, ordered chronologically
     """
-    results = database_session.query(
-        View.release_year,
-        func.count(View.id).label('count')
-    ).filter(
-        View.viewer_id == user_id,
-        View.media_type == media_type
-    ).group_by(View.release_year).order_by(View.release_year.asc()).all()
+    results = (
+        database_session.query(View.release_year, func.count(View.id).label("count"))
+        .filter(View.viewer_id == user_id, View.media_type == media_type)
+        .group_by(View.release_year)
+        .order_by(View.release_year.asc())
+        .all()
+    )
 
     return [
         ViewCountByYear(release_year=result.release_year, count=result.count)
@@ -98,12 +90,10 @@ def get_view_count_by_year(
     "/runtime/{media_type}/{user_id}",
     response_model=List[ViewRuntime],
     summary="Get runtime statistics",
-    description="Get runtime information for all media watched by a user"
+    description="Get runtime information for all media watched by a user",
 )
 def get_runtime_by_user(
-        media_type: str,
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    media_type: str, user_id: UUID, database_session: Session = Depends(get_database)
 ) -> List[ViewRuntime]:
     """
     Get runtime statistics for all media watched by a user.
@@ -120,9 +110,10 @@ def get_runtime_by_user(
     Returns:
         List[ViewRuntime]: List of runtime values for all watched media
     """
-    results = database_session.query(View.runtime).filter(
-        View.viewer_id == user_id,
-        View.media_type == media_type
-    ).all()
+    results = (
+        database_session.query(View.runtime)
+        .filter(View.viewer_id == user_id, View.media_type == media_type)
+        .all()
+    )
 
     return [ViewRuntime(runtime=result.runtime) for result in results]

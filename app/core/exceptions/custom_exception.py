@@ -7,6 +7,7 @@ class CustomExceptionError(Exception):
     """
     Custom exception class
     """
+
     def __init__(
         self,
         error_dict: dict,
