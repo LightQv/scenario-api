@@ -129,4 +129,4 @@ alembic downgrade -1
 
 ## 📄 License
 
-This project is licensed under the **ISC License** — see [LICENSE](LICENSE) for details.
+This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
