@@ -18,15 +18,11 @@ engine = create_engine(
     pool_pre_ping=True,  # Verify connections before use
     pool_size=10,  # Number of connections to maintain in pool
     max_overflow=20,  # Additional connections beyond pool_size
-    echo=settings.DEBUG  # Log SQL queries in debug mode
+    echo=settings.DEBUG,  # Log SQL queries in debug mode
 )
 
 # Create session factory
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_database_session() -> Generator[Session, None, None]:

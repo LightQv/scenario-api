@@ -1,6 +1,7 @@
 """
 Email sending module using FastAPI Mail.
 """
+
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from pydantic import EmailStr
 
@@ -15,15 +16,15 @@ config = ConnectionConfig(
     MAIL_STARTTLS=settings.SMTP_USE_TLS,
     MAIL_SSL_TLS=False,
     USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True
+    VALIDATE_CERTS=True,
 )
 
 
 async def send_email(
-        subject: str,
-        email_to: list[str] | list[EmailStr],
-        body: str,
-        attachments: list[dict[str, str | bytes]] | None = None,
+    subject: str,
+    email_to: list[str] | list[EmailStr],
+    body: str,
+    attachments: list[dict[str, str | bytes]] | None = None,
 ) -> None:
     """
     Email the specified emails address.
@@ -37,7 +38,7 @@ async def send_email(
         "subject": subject,
         "recipients": email_to,
         "body": body,
-        "subtype": MessageType.html
+        "subtype": MessageType.html,
     }
 
     if attachments:

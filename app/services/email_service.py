@@ -9,7 +9,9 @@ from app.core.email import send_email
 from app.utils.email_templates import get_password_reset_template
 
 
-async def send_forgotten_password_email(user_email: str, username: str, reset_token: str) -> None:
+async def send_forgotten_password_email(
+    user_email: str, username: str, reset_token: str
+) -> None:
     """
     Send password reset email to user.
 

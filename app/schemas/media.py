@@ -35,7 +35,5 @@ class MediaResponse(BaseModel):
     watchlist_id: UUID
 
     model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+        from_attributes=True, populate_by_name=True, str_strip_whitespace=True
     )

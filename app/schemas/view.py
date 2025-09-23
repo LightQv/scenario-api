@@ -33,10 +33,9 @@ class ViewResponse(BaseModel):
     viewer_id: UUID
 
     model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+        from_attributes=True, populate_by_name=True, str_strip_whitespace=True
     )
+
 
 class ViewCountByType(BaseModel):
     media_type: str

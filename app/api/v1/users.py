@@ -7,16 +7,20 @@ from app.api.dependencies import get_database, get_current_user
 from app.core.security import hash_password
 from app.models import User
 from app.schemas import (
-    UserPublic, UserBanner, UserUpdate, UserUpdateEmail,
-    UserUpdatePassword, UserUpdateBanner
+    UserPublic,
+    UserBanner,
+    UserUpdate,
+    UserUpdateEmail,
+    UserUpdatePassword,
+    UserUpdateBanner,
 )
 
 router = APIRouter(
     tags=["Users"],
     responses={
         404: {"description": "User not found"},
-        403: {"description": "Access forbidden"}
-    }
+        403: {"description": "Access forbidden"},
+    },
 )
 
 
@@ -24,11 +28,10 @@ router = APIRouter(
     "/{user_id}",
     response_model=UserPublic,
     summary="Get user public information",
-    description="Retrieve public profile information for any user by their ID"
+    description="Retrieve public profile information for any user by their ID",
 )
 def get_user(
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    user_id: UUID, database_session: Session = Depends(get_database)
 ) -> UserPublic:
     """
     Get public user information by user ID.
@@ -51,8 +54,7 @@ def get_user(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return UserPublic.model_validate(user)
@@ -62,11 +64,10 @@ def get_user(
     "/banner/{user_id}",
     response_model=UserBanner,
     summary="Get user profile banner",
-    description="Retrieve only the profile banner URL for a specific user"
+    description="Retrieve only the profile banner URL for a specific user",
 )
 def get_user_banner(
-        user_id: UUID,
-        database_session: Session = Depends(get_database)
+    user_id: UUID, database_session: Session = Depends(get_database)
 ) -> UserBanner:
     """
     Get user profile banner by user ID.
@@ -88,8 +89,7 @@ def get_user_banner(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return UserBanner.model_validate(user)
@@ -99,13 +99,13 @@ def get_user_banner(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update user profile",
-    description="Update complete user profile information (requires authentication)"
+    description="Update complete user profile information (requires authentication)",
 )
 def update_user(
-        user_id: UUID,
-        user_data: UserUpdate,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    user_id: UUID,
+    user_data: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Update complete user profile information.
@@ -129,14 +129,13 @@ def update_user(
     if str(current_user.id) != str(user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this user"
+            detail="Not authorized to modify this user",
         )
 
     user = database_session.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     # Update provided fields
@@ -153,7 +152,7 @@ def update_user(
         database_session.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username or email already exists"
+            detail="Username or email already exists",
         )
 
 
@@ -161,13 +160,13 @@ def update_user(
     "/email/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update user email",
-    description="Update only the user's email address (requires authentication)"
+    description="Update only the user's email address (requires authentication)",
 )
 def update_user_email(
-        user_id: UUID,
-        email_data: UserUpdateEmail,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    user_id: UUID,
+    email_data: UserUpdateEmail,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Update user email address only.
@@ -190,14 +189,13 @@ def update_user_email(
     if str(current_user.id) != str(user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this user"
+            detail="Not authorized to modify this user",
         )
 
     user = database_session.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     try:
@@ -206,8 +204,7 @@ def update_user_email(
     except IntegrityError:
         database_session.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already exists"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists"
         )
 
 
@@ -215,13 +212,13 @@ def update_user_email(
     "/password/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update user password",
-    description="Update only the user's password (requires authentication)"
+    description="Update only the user's password (requires authentication)",
 )
 def update_user_password(
-        user_id: UUID,
-        password_data: UserUpdatePassword,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    user_id: UUID,
+    password_data: UserUpdatePassword,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Update user password only.
@@ -243,14 +240,13 @@ def update_user_password(
     if str(current_user.id) != str(user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this user"
+            detail="Not authorized to modify this user",
         )
 
     user = database_session.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     user.hashed_password = hash_password(password_data.password)
@@ -262,13 +258,13 @@ def update_user_password(
     "/banner/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Update user profile banner",
-    description="Update only the user's profile banner image URL"
+    description="Update only the user's profile banner image URL",
 )
 def update_user_banner(
-        user_id: UUID,
-        banner_data: UserUpdateBanner,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    user_id: UUID,
+    banner_data: UserUpdateBanner,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Update user profile banner only.
@@ -290,14 +286,13 @@ def update_user_banner(
     if str(current_user.id) != str(user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to modify this user"
+            detail="Not authorized to modify this user",
         )
 
     user = database_session.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     user.profile_banner = banner_data.banner_link
@@ -308,12 +303,12 @@ def update_user_banner(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete user account",
-    description="Permanently delete user account and all associated data"
+    description="Permanently delete user account and all associated data",
 )
 def delete_user(
-        user_id: UUID,
-        current_user: User = Depends(get_current_user),
-        database_session: Session = Depends(get_database)
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
 ):
     """
     Delete user account permanently.
@@ -334,14 +329,13 @@ def delete_user(
     if str(current_user.id) != str(user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this user"
+            detail="Not authorized to delete this user",
         )
 
     user = database_session.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     database_session.delete(user)

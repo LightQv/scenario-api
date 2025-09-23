@@ -33,14 +33,16 @@ RUN uv pip install --system --no-cache-dir -r requirements.txt
 # Copy application code
 COPY ./app /scenario/app
 
+# Create uploads directory and set proper permissions
+RUN mkdir -p /scenario/app/uploads \
+    && chown -R user:user /scenario/app/uploads \
+    && chmod -R 755 /scenario/app/uploads
+
 # Switch to non-root user
 USER user
 
 # Expose the application port
 EXPOSE 8000
 
-# Run database migrations
-CMD ["alembic", "upgrade", "head"]
-
 # Default command for development
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]

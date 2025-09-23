@@ -3,9 +3,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import get_database
-from app.core.security import hash_password, verify_password, create_access_token, generate_password_reset_token
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    generate_password_reset_token,
+)
 from app.models import User
-from app.schemas import UserRegister, UserLogin, ForgottenPassword, PasswordReset, Token, UserResponse
+from app.schemas import (
+    UserRegister,
+    UserLogin,
+    ForgottenPassword,
+    PasswordReset,
+    UserResponse,
+)
 from app.services.email_service import send_forgotten_password_email
 from app.core.settings import settings
 
@@ -13,8 +24,8 @@ router = APIRouter(
     tags=["Authentication"],
     responses={
         401: {"description": "Authentication failed"},
-        403: {"description": "Access forbidden"}
-    }
+        403: {"description": "Access forbidden"},
+    },
 )
 
 
@@ -22,11 +33,10 @@ router = APIRouter(
     "/register",
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
-    description="Create a new user account with username, email, and password validation"
+    description="Create a new user account with username, email, and password validation",
 )
 def register_user(
-        user_data: UserRegister,
-        database_session: Session = Depends(get_database)
+    user_data: UserRegister, database_session: Session = Depends(get_database)
 ) -> dict:
     """
     Register a new user account.
@@ -51,7 +61,7 @@ def register_user(
     new_user = User(
         username=user_data.username,
         email=user_data.email,
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
     )
 
     try:
@@ -62,7 +72,7 @@ def register_user(
         database_session.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username or email already exists"
+            detail="Username or email already exists",
         )
 
 
@@ -70,12 +80,12 @@ def register_user(
     "/login",
     response_model=UserResponse,
     summary="Authenticate user login",
-    description="Authenticate user with email and password, returns user data and sets authentication cookie"
+    description="Authenticate user with email and password, returns user data and sets authentication cookie",
 )
 def login_user(
-        user_credentials: UserLogin,
-        response: Response,
-        database_session: Session = Depends(get_database)
+    user_credentials: UserLogin,
+    response: Response,
+    database_session: Session = Depends(get_database),
 ) -> UserResponse:
     """
     Authenticate user login and set authentication cookie.
@@ -95,12 +105,15 @@ def login_user(
         HTTPException: 401 if credentials are invalid
     """
     # Find user by email
-    user = database_session.query(User).filter(User.email == user_credentials.email).first()
+    user = (
+        database_session.query(User)
+        .filter(User.email == user_credentials.email)
+        .first()
+    )
 
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
         )
 
     # Create JWT token
@@ -113,7 +126,7 @@ def login_user(
         httponly=True,
         secure=not settings.DEBUG,  # HTTPS in production
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRES_IN * 60,
-        samesite="lax"
+        samesite="lax",
     )
 
     return UserResponse.model_validate(user)
@@ -123,11 +136,10 @@ def login_user(
     "/forgotten-password",
     status_code=status.HTTP_200_OK,
     summary="Request password reset",
-    description="Send password reset email to user's registered email address"
+    description="Send password reset email to user's registered email address",
 )
 async def request_password_reset(
-        email_data: ForgottenPassword,
-        database_session: Session = Depends(get_database)
+    email_data: ForgottenPassword, database_session: Session = Depends(get_database)
 ) -> dict:
     """
     Send password reset email to user.
@@ -150,8 +162,7 @@ async def request_password_reset(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         )
 
     # Generate reset token
@@ -165,10 +176,10 @@ async def request_password_reset(
     try:
         await send_forgotten_password_email(user.email, user.username, reset_token)
         return {"message": "Password reset email sent"}
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send email"
+            detail="Failed to send email",
         )
 
 
@@ -176,11 +187,10 @@ async def request_password_reset(
     "/reset-password",
     status_code=status.HTTP_200_OK,
     summary="Reset user password",
-    description="Reset password using the token received via email"
+    description="Reset password using the token received via email",
 )
 def reset_password(
-        reset_data: PasswordReset,
-        database_session: Session = Depends(get_database)
+    reset_data: PasswordReset, database_session: Session = Depends(get_database)
 ) -> dict:
     """
     Reset user password using email token.
@@ -199,12 +209,15 @@ def reset_password(
         HTTPException: 400 if reset token is invalid
     """
     # Find user by token
-    user = database_session.query(User).filter(User.password_token == reset_data.password_token).first()
+    user = (
+        database_session.query(User)
+        .filter(User.password_token == reset_data.password_token)
+        .first()
+    )
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid reset token"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset token"
         )
 
     # Update password and invalidate token
@@ -219,7 +232,7 @@ def reset_password(
     "/logout",
     status_code=status.HTTP_200_OK,
     summary="Logout user",
-    description="Clear authentication cookie to log out the user"
+    description="Clear authentication cookie to log out the user",
 )
 def logout_user(response: Response) -> dict:
     """
@@ -235,10 +248,7 @@ def logout_user(response: Response) -> dict:
         dict: Success message confirming logout
     """
     response.delete_cookie(
-        key="access_token",
-        httponly=True,
-        secure=not settings.DEBUG,
-        samesite="lax"
+        key="access_token", httponly=True, secure=not settings.DEBUG, samesite="lax"
     )
 
     return {"message": "Logged out successfully"}

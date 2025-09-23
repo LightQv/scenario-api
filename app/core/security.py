@@ -6,11 +6,14 @@ import uuid
 
 from app.core.exceptions.custom_exception import CustomExceptionError
 from app.core.settings import settings
-from app.services.constant.response_constant import EXPIRED_TOKEN_ERROR, INVALID_TOKEN_ERROR
+from app.services.constant.response_constant import (
+    EXPIRED_TOKEN_ERROR,
+    INVALID_TOKEN_ERROR,
+)
 
 
 def create_access_token(
-        subject: Union[str, Any], expires_delta: Optional[timedelta] = None
+    subject: Union[str, Any], expires_delta: Optional[timedelta] = None
 ) -> str:
     """
     Create a JWT access token for user authentication.
@@ -98,8 +101,8 @@ def hash_password(password: str) -> str:
         >>> # Returns: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RVSg2/CPK"
     """
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -121,8 +124,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         >>> # Returns: True or False
     """
     return bcrypt.checkpw(
-        plain_password.encode('utf-8'),
-        hashed_password.encode('utf-8')
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
     )
 
 
