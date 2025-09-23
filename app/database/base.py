@@ -33,7 +33,9 @@ class Base(DeclarativeBase):
     """
 
     created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     def __repr__(self):
         """
@@ -58,12 +60,10 @@ class Base(DeclarativeBase):
             )
         """
         data: dict = {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
+            column.name: getattr(self, column.name) for column in self.__table__.columns
         }
         return (
-            f"{self.__class__.__name__}"
-            f"(\n{json.dumps(data, indent=2, default=str)}\n)"
+            f"{self.__class__.__name__}(\n{json.dumps(data, indent=2, default=str)}\n)"
         )
 
 

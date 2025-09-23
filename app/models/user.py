@@ -36,7 +36,7 @@ class User(Base):
     Example:
         >>> user = User(
         ...     username="moviefan123",
-        ...     email="fan@example.com", 
+        ...     email="fan@example.com",
         ...     hashed_password="$2b$12$..."
         ... )
         >>> db.session.add(user)
@@ -57,13 +57,10 @@ class User(Base):
         "Watchlist",
         back_populates="author",
         cascade="all, delete-orphan",
-        lazy="dynamic"
+        lazy="dynamic",
     )
     views = relationship(
-        "View",
-        back_populates="viewer",
-        cascade="all, delete-orphan",
-        lazy="dynamic"
+        "View", back_populates="viewer", cascade="all, delete-orphan", lazy="dynamic"
     )
 
     def __str__(self):

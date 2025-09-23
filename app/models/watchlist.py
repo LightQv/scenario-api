@@ -53,7 +53,7 @@ class Watchlist(Base):
         UUID(as_uuid=True),
         ForeignKey("user_model.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
 
     # Relationships
@@ -62,7 +62,7 @@ class Watchlist(Base):
         "Media",
         back_populates="watchlist",
         cascade="all, delete-orphan",
-        lazy="dynamic"
+        lazy="dynamic",
     )
 
     def __str__(self):

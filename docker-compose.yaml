@@ -32,6 +32,7 @@ services:
     volumes:
       - ./app:/scenario/app:ro
       - ./alembic.ini:/scenario/alembic.ini:ro
+      - scenario-uploads-dev-data:/scenario/app/uploads:rw
     env_file:
       - .env
     environment:
@@ -44,6 +45,7 @@ services:
 
 volumes:
   scenario-postgres-dev-data:
+  scenario-uploads-dev-data:
 
 networks:
   scenario-network:

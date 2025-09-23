@@ -37,7 +37,7 @@ app = FastAPI(
     """,
     contact={
         "name": "Scenario API Support",
-        "url": "https://github.com/your-repo/scenario-api",
+        "url": "https://github.com/LightQv/scenario-fast-api",
         "email": settings.MAIL_FROM,
     },
     license_info={
@@ -60,7 +60,7 @@ register_exception_handlers(app)
     "/",
     summary="API Root",
     description="Welcome endpoint providing basic API information and navigation links",
-    tags=["Root"]
+    tags=["Root"],
 )
 def read_root():
     """
@@ -78,7 +78,7 @@ def read_root():
         "description": "A modern FastAPI application for managing movie and TV show watchlists",
         "docs": "/docs",
         "redoc": "/redoc",
-        "health": "/health"
+        "health": "/health",
     }
 
 
@@ -86,7 +86,7 @@ def read_root():
     "/health",
     summary="Health Check",
     description="Simple health check endpoint for monitoring and load balancers",
-    tags=["Health"]
+    tags=["Health"],
 )
 def health_check():
     """
@@ -102,5 +102,5 @@ def health_check():
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
-        "version": settings.APP_VERSION
+        "version": settings.APP_VERSION,
     }

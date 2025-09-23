@@ -65,7 +65,10 @@ async def validation_exception_handler(
         for error in errors_list
     ]
 
-    response_content: dict = {"detail": "Pydantic validation error", "errors": formatted_errors}
+    response_content: dict = {
+        "detail": "Pydantic validation error",
+        "errors": formatted_errors,
+    }
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -135,7 +138,9 @@ def register_exception_handlers(app: FastAPI):
     them as exception handlers if they match the naming convention.
     """
     current_module = sys.modules[__name__]
-    for name, function in inspect.getmembers(current_module, inspect.iscoroutinefunction):
+    for name, function in inspect.getmembers(
+        current_module, inspect.iscoroutinefunction
+    ):
         if name.endswith("_handler") and name in EXCEPTION_HANDLER_MAP:
             exception_class = EXCEPTION_HANDLER_MAP[name]
             app.add_exception_handler(exception_class, function)

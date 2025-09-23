@@ -15,18 +15,22 @@ from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
 def get_local_tables() -> List[str]:
     """Return list of tables in local DB (public schema)."""
     try:
         engine = create_engine(settings.DATABASE_URL)
         with engine.connect() as connection:
-            result = connection.execute(text(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
-            ))
+            result = connection.execute(
+                text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+                )
+            )
             return [row[0] for row in result.fetchall()]
     except Exception as e:
         logger.error(f"Error getting table names: {e}")
         return []
+
 
 def import_dump(dump_path: str) -> bool:
     """Import the cleaned dump into the database using psql."""
@@ -40,29 +44,35 @@ def import_dump(dump_path: str) -> bool:
     db_url = settings.DATABASE_URL
     # Extract connection details from DATABASE_URL
     # Format: postgresql://user:password@host:port/database
-    
+
     import re
-    match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', db_url)
+
+    match = re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", db_url)
     if not match:
         logger.error("Could not parse DATABASE_URL")
         return False
-    
+
     user, password, host, port, database = match.groups()
-    
+
     # Set environment variable for password
     env = os.environ.copy()
-    env['PGPASSWORD'] = password
-    
+    env["PGPASSWORD"] = password
+
     # Run psql command directly
     import_cmd = [
-        'psql', 
-        '-h', host,
-        '-p', port,
-        '-U', user,
-        '-d', database,
-        '-f', str(dump_path)
+        "psql",
+        "-h",
+        host,
+        "-p",
+        port,
+        "-U",
+        user,
+        "-d",
+        database,
+        "-f",
+        str(dump_path),
     ]
-    
+
     logger.info("📥 Importing dump into database...")
     result = subprocess.run(import_cmd, capture_output=True, text=True, env=env)
 
@@ -73,6 +83,7 @@ def import_dump(dump_path: str) -> bool:
 
     logger.info("✅ Import completed successfully")
     return True
+
 
 def main():
     print("🔄 Scenario API - Supabase Import (Production)")
@@ -112,6 +123,7 @@ def main():
     else:
         print("\n❌ Import failed.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

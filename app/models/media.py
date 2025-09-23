@@ -71,7 +71,7 @@ class Media(Base):
         UUID(as_uuid=True),
         ForeignKey("watchlist_model.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
 
     # Relationships
