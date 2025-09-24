@@ -3,99 +3,85 @@ from app.core.settings import settings
 
 def get_password_reset_template(username: str, reset_token: str) -> str:
     """
-    Génère le template HTML pour l'email de réinitialisation de mot de passe.
+    Generate HTML template for reset password email
 
     Args:
-        username: Nom d'utilisateur
-        reset_token: Token de réinitialisation
+        username: Username
+        reset_token: Reset token
 
     Returns:
         Template HTML complet
     """
     return f"""
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Fira+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body
-        style="
-          margin: auto;
-          background-color: #ffffff;
-          border-radius: 1rem;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          gap: 1rem;
-          font-family: 'Fira Sans', sans-serif;
-          --tw-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1),
-            0 4px 6px -4px rgb(0 0 0 / 0.1);
-          --tw-shadow-colored: 0 10px 15px -3px var(--tw-shadow-color),
-            0 4px 6px -4px var(--tw-shadow-color);
-          box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000),
-            var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-        "
-      >
-        <section style="text-align: center; padding-bottom: 0.5rem">
-          <h1
-            style="
-              font-weight: 400;
-              font-size: 1.75rem;
-              font-family: 'Abril Fatface', serif;
-            "
-          >
-            Hey {username},
-          </h1>
-          <h2 style="font-size: 1rem; font-weight: 400">
-            You need to change your SCENARIO password ?
-          </h2>
-        </section>
-        <a
-          href="{settings.FRONTEND_URL}/reset-password/{reset_token}"
-          style="
-            border: 1px solid #eab208;
-            border-radius: 0.375rem;
-            padding: 0.15rem 1rem;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-          "
-          >
-          <p
-          style="
-            color: #eab208;
-          "
-          >
-            RESET PASSWORD
-          </p>
-        </a>
-        <p style="text-align: center; font-size: 1rem">
-          If you did not initiate this request, please contact us immediately at
-          <a
-            href="mailto:{settings.MAIL_FROM}"
-            style="
-              text-decoration-line: underline;
-              text-underline-offset: 4px;
-              text-decoration-thickness: 2px;
-              text-decoration-color: #eab208;
-              color: black;
-            "
-            >{settings.MAIL_FROM}</a
-          >.
-        </p>
-        <p style="text-align: center; font-size: 1rem">
-          Thank you,<br />The SCENARIO's Team.
-        </p>
-      </body>
-    </html>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Fira+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {{
+        margin: 0;
+        padding: 0;
+        background-color: #ffffff;
+        font-family: 'Fira Sans', sans-serif;
+      }}
+      table {{
+        border-collapse: collapse;
+      }}
+    </style>
+  </head>
+  <body>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center" style="padding: 20px;">
+          <table width="600" cellpadding="0" cellspacing="0" style="border:1px solid #ddd;border-radius:8px;">
+            <tr>
+              <td style="padding:20px;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="center">
+                      <h1 style="font-family:'Abril Fatface', serif;font-size:24px;font-weight:400;margin:0;">
+                        Hey {username},
+                      </h1>
+                      <h2 style="font-size:16px;font-weight:400;margin-top:10px;">
+                        You need to change your SCENARIO password?
+                      </h2>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td align="center" style="padding:20px 0;">
+                      <a href="{settings.FRONTEND_URL}/reset-password/{reset_token}" style="color:#eab208;text-decoration:none;display:inline-block;border:1px solid #eab208;border-radius:6px;padding:10px 20px;font-weight:600;">
+                        RESET PASSWORD
+                      </a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td align="center" style="padding:10px 0;font-size:14px;color:#333;">
+                      If you did not initiate this request, please contact us immediately at
+                      <a href="mailto:{settings.MAIL_SERVICE}" style="color:#000;text-decoration:underline;">
+                        {settings.MAIL_SERVICE}
+                      </a>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td align="center" style="padding-top:10px;font-size:14px;color:#333;">
+                      Thank you,<br />The SCENARIO's Team.
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
     """
