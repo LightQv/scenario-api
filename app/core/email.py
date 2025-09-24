@@ -39,6 +39,7 @@ async def send_email(
         "recipients": email_to,
         "body": body,
         "subtype": MessageType.html,
+        "sender": settings.MAIL_FROM,
     }
 
     if attachments:
