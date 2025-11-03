@@ -32,6 +32,7 @@ class MediaResponse(BaseModel):
     runtime: int
     title: str
     media_type: str
+    type: str
     watchlist_id: UUID
 
     model_config = ConfigDict(

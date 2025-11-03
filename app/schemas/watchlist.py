@@ -29,6 +29,7 @@ class MediaInWatchlist(BaseModel):
 class WatchlistResponse(BaseModel):
     id: UUID
     title: str
+    type: str
     author_id: UUID
     medias: List[MediaInWatchlist] = []
     medias_count: int = 0
@@ -40,6 +41,7 @@ class WatchlistResponse(BaseModel):
 
 class WatchlistDetail(BaseModel):
     title: str
+    type: str
     medias: List["MediaResponse"] = []
     medias_count: int = 0
 

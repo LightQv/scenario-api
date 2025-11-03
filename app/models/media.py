@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 from app.database.base import Base
+from app.models.enums import MediaType
 
 
 class Media(Base):
@@ -31,6 +32,7 @@ class Media(Base):
         runtime (int): Duration in minutes
         title (str): Movie or TV show title
         media_type (str): Type of media ('movie' or 'tv')
+        type (str): Media state - either "PENDING" or "IN_WATCHLIST" (default: "IN_WATCHLIST")
         watchlist_id (UUID): Foreign key reference to the containing Watchlist
 
     Relationships:
@@ -67,6 +69,7 @@ class Media(Base):
     runtime = Column(Integer, nullable=False)
     title = Column(String, nullable=False)
     media_type = Column(String, nullable=False, index=True)
+    type = Column(String(50), nullable=False, default=MediaType.IN_WATCHLIST.value)
     watchlist_id = Column(
         UUID(as_uuid=True),
         ForeignKey("watchlist_model.id", ondelete="CASCADE"),
