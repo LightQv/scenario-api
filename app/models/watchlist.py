@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 from app.database.base import Base
+from app.models.enums import WatchlistType
 
 
 class Watchlist(Base):
@@ -25,6 +26,7 @@ class Watchlist(Base):
     Attributes:
         id (UUID): Primary key - unique identifier for the watchlist
         title (str): User-defined name/title for the watchlist
+        type (str): Watchlist type - either "USER" or "SYSTEM" (default: "USER")
         author_id (UUID): Foreign key reference to the User who created this watchlist
 
     Relationships:
@@ -49,6 +51,7 @@ class Watchlist(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
+    type = Column(String(50), nullable=False, default=WatchlistType.USER.value)
     author_id = Column(
         UUID(as_uuid=True),
         ForeignKey("user_model.id", ondelete="CASCADE"),

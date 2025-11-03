@@ -9,7 +9,8 @@ from app.core.security import (
     create_access_token,
     generate_password_reset_token,
 )
-from app.models import User
+from app.models import User, Watchlist
+from app.models.enums import WatchlistType
 from app.schemas import (
     UserRegister,
     UserLogin,
@@ -67,6 +68,17 @@ def register_user(
     try:
         database_session.add(new_user)
         database_session.commit()
+        database_session.refresh(new_user)
+
+        # Create default "toWatch" system watchlist for the new user
+        default_watchlist = Watchlist(
+            title="toWatch",
+            type=WatchlistType.SYSTEM.value,
+            author_id=new_user.id,
+        )
+        database_session.add(default_watchlist)
+        database_session.commit()
+
         return {"message": "User created successfully"}
     except IntegrityError:
         database_session.rollback()

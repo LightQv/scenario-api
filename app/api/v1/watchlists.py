@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, Watchlist, Media
+from app.models.enums import WatchlistType
 from app.schemas import (
     WatchlistCreate,
     WatchlistUpdate,
@@ -49,12 +50,13 @@ def get_user_watchlists(
         database_session.query(
             Watchlist.id,
             Watchlist.title,
+            Watchlist.type,
             Watchlist.author_id,
             func.count(Media.id).label("medias_count"),
         )
         .outerjoin(Media, Watchlist.id == Media.watchlist_id)
         .filter(Watchlist.author_id == user_id)
-        .group_by(Watchlist.id, Watchlist.title, Watchlist.author_id)
+        .group_by(Watchlist.id, Watchlist.title, Watchlist.type, Watchlist.author_id)
         .all()
     )
 
@@ -70,6 +72,7 @@ def get_user_watchlists(
         watchlist_response = WatchlistResponse(
             id=watchlist_data.id,
             title=watchlist_data.title,
+            type=watchlist_data.type,
             author_id=watchlist_data.author_id,
             medias=[{"id": media.id, "tmdb_id": media.tmdb_id} for media in medias],
             medias_count=watchlist_data.medias_count or 0,
@@ -123,7 +126,6 @@ def get_watchlist_details(
 
     # Apply genre filter if specified
     if genre is not None:
-        print(genre)
         media_query = media_query.filter(Media.genre_ids.any(genre))
 
     medias = media_query.all()
@@ -137,6 +139,7 @@ def get_watchlist_details(
 
     return WatchlistDetail(
         title=watchlist.title,
+        type=watchlist.type,
         medias=[MediaResponse.model_validate(media) for media in medias],
         medias_count=total_medias_count,
     )
@@ -220,6 +223,13 @@ def update_watchlist(
             detail="Not authorized to modify this watchlist",
         )
 
+    # Prevent modification of SYSTEM watchlists
+    if watchlist.type == WatchlistType.SYSTEM.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot modify system watchlists",
+        )
+
     # Update provided fields
     update_data = watchlist_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -269,6 +279,13 @@ def delete_watchlist(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this watchlist",
+        )
+
+    # Prevent deletion of SYSTEM watchlists
+    if watchlist.type == WatchlistType.SYSTEM.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete system watchlists",
         )
 
     database_session.delete(watchlist)

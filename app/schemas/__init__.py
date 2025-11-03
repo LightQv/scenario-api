@@ -7,6 +7,7 @@ from app.schemas.watchlist import (
     WatchlistCreate, WatchlistUpdate, WatchlistResponse, WatchlistDetail, MediaInWatchlist
 )
 from app.schemas.media import MediaCreate, MediaUpdate, MediaResponse
+from app.schemas.bookmark import BookmarkCreate
 from app.schemas.view import ViewCreate, ViewResponse, ViewCountByType, ViewCountByYear, ViewRuntime
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "UserUpdateBanner", "UserResponse", "UserPublic", "UserBanner",
     "WatchlistCreate", "WatchlistUpdate", "WatchlistResponse", "WatchlistDetail", "MediaInWatchlist",
     "MediaCreate", "MediaUpdate", "MediaResponse",
+    "BookmarkCreate",
     "ViewCreate", "ViewResponse", "ViewCountByType", "ViewCountByYear", "ViewRuntime"
 ]
