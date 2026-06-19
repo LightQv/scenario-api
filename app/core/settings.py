@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # Media server integrations
     RADARR_URL: str
     RADARR_API_KEY: str
+    OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
+    OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
+    OWNED_MEDIA_SYNC_TIMEZONE: str = "Europe/Paris"
 
     # Security and validation settings
     PASSWORD_MIN_LENGTH: int = 7

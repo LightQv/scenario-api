@@ -183,6 +183,8 @@ typing-inspection==0.4.1
     # via
     #   pydantic
     #   pydantic-settings
+tzdata==2025.2
+    # via -r requirements.in
 urllib3==2.5.0
     # via sentry-sdk
 uvicorn[standard]==0.35.0
