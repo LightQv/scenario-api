@@ -117,6 +117,8 @@ pygments==2.19.2
     # via
     #   pytest
     #   rich
+pyarr
+    # via -r requirements.in
 pyjwt==2.10.1
     # via -r requirements.in
 pylint==3.3.7

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str
     SMTP_USE_TLS: bool = True
 
+    # Media server integrations
+    RADARR_URL: str
+    RADARR_API_KEY: str
+
     # Security and validation settings
     PASSWORD_MIN_LENGTH: int = 7
     PASSWORD_MAX_LENGTH: int = 30
