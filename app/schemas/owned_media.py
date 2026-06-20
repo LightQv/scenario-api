@@ -23,3 +23,16 @@ class OwnedMediaSyncResponse(BaseModel):
     media_type: str = Field(description="Media type synced from the source")
     owned_count: int = Field(description="Number of owned media rows stored")
     synced_at: datetime = Field(description="Timestamp when the sync completed")
+
+
+class OwnedMediaSyncStatusResponse(BaseModel):
+    source: str
+    media_type: str
+    status: str
+    trigger: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    owned_count: int | None = None
+    error_message: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)

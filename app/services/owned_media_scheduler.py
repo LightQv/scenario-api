@@ -13,7 +13,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.logger import log
 from app.core.settings import settings
 from app.database.session import SessionLocal
-from app.services.owned_media_service import sync_radarr_owned_movies
+from app.services.owned_media_service import (
+    SYNC_TRIGGER_SCHEDULED,
+    SyncAlreadyRunningError,
+    sync_radarr_owned_movies,
+)
 
 
 class OwnedMediaScheduler:
@@ -85,16 +89,11 @@ class OwnedMediaScheduler:
         """
         database_session = SessionLocal()
         try:
-            result = sync_radarr_owned_movies(database_session)
-            log.info(
-                "Owned media auto-sync completed: {} {} rows from {}",
-                result.owned_count,
-                result.media_type,
-                result.source,
-            )
-        except Exception as error:  # pylint: disable=broad-exception-caught
+            sync_radarr_owned_movies(database_session, trigger=SYNC_TRIGGER_SCHEDULED)
+        except SyncAlreadyRunningError:
             database_session.rollback()
-            log.exception("Owned media auto-sync failed: {}", error)
+        except Exception:  # pylint: disable=broad-exception-caught
+            database_session.rollback()
         finally:
             database_session.close()
 
