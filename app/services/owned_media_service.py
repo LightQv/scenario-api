@@ -19,6 +19,8 @@ from app.schemas import (
     OwnedMediaStatusResponse,
     OwnedMediaSyncResponse,
     OwnedMediaSyncStatusResponse,
+    RadarrWebhookPayload,
+    RadarrWebhookResponse,
 )
 from app.services.radarr_service import RadarrService
 from app.services.tmdb_service import TmdbMovieMetadata, TmdbService
@@ -31,9 +33,12 @@ SYNC_STATUS_SUCCESS = "success"
 SYNC_STATUS_FAILED = "failed"
 SYNC_TRIGGER_MANUAL = "manual"
 SYNC_TRIGGER_SCHEDULED = "scheduled"
+SYNC_TRIGGER_WEBHOOK = "webhook"
 STALE_RUNNING_SYNC_AFTER = timedelta(hours=2)
 TMDB_METADATA_WORKERS = 5
 _radarr_movie_sync_lock = Lock()
+RADARR_IMPORT_EVENTS = {"download", "moviefileimport", "fileimport"}
+RADARR_DELETE_EVENTS = {"moviedelete", "moviefiledelete"}
 
 
 class SyncAlreadyRunningError(Exception):
@@ -251,6 +256,214 @@ def _fetch_movie_metadata(tmdb_ids: list[int]) -> list[TmdbMovieMetadata]:
     return sorted(movie_metadata, key=lambda item: item.title.lower())
 
 
+def handle_radarr_webhook(
+    payload: RadarrWebhookPayload,
+    database_session: Session,
+) -> RadarrWebhookResponse:
+    """Handle Radarr webhook events that affect owned movie availability.
+
+    Args:
+        payload: Parsed Radarr webhook payload.
+        database_session: Database session dependency.
+
+    Returns:
+        RadarrWebhookResponse: Summary of the handled or ignored event.
+    """
+    event_type = payload.eventType or "unknown"
+    normalized_event_type = event_type.lower()
+
+    # Temporary operational log to capture the exact Radarr payload shape in prod.
+    log.info("Radarr webhook payload: {}", payload.model_dump(mode="json"))
+
+    if normalized_event_type == "test":
+        log.info("Radarr webhook test received")
+        return RadarrWebhookResponse(
+            status="success",
+            event_type=event_type,
+            action="test",
+        )
+
+    tmdb_id = _extract_radarr_webhook_tmdb_id(payload)
+    if not tmdb_id:
+        log.info("Radarr webhook ignored: event_type={} missing_tmdb_id", event_type)
+        return RadarrWebhookResponse(
+            status="ignored",
+            event_type=event_type,
+            action="missing_tmdb_id",
+        )
+
+    try:
+        if normalized_event_type in RADARR_IMPORT_EVENTS:
+            _upsert_radarr_owned_movie(database_session, tmdb_id)
+            _mark_webhook_sync_success(database_session)
+            database_session.commit()
+            log.info("Radarr webhook imported owned movie: tmdb_id={}", tmdb_id)
+            return RadarrWebhookResponse(
+                status="success",
+                event_type=event_type,
+                action="upserted",
+                tmdb_id=tmdb_id,
+            )
+
+        if normalized_event_type in RADARR_DELETE_EVENTS:
+            if _is_radarr_upgrade_delete(payload):
+                log.info(
+                    "Radarr webhook ignored upgrade delete: event_type={} tmdb_id={}",
+                    event_type,
+                    tmdb_id,
+                )
+                return RadarrWebhookResponse(
+                    status="ignored",
+                    event_type=event_type,
+                    action="upgrade_delete",
+                    tmdb_id=tmdb_id,
+                )
+
+            deleted_count = _delete_radarr_owned_movie(database_session, tmdb_id)
+            _mark_webhook_sync_success(database_session)
+            database_session.commit()
+            log.info(
+                "Radarr webhook deleted owned movie: tmdb_id={} deleted_count={}",
+                tmdb_id,
+                deleted_count,
+            )
+            return RadarrWebhookResponse(
+                status="success",
+                event_type=event_type,
+                action="deleted",
+                tmdb_id=tmdb_id,
+            )
+    except Exception as error:
+        database_session.rollback()
+        _mark_sync_failed(
+            database_session,
+            RADARR_SOURCE,
+            MOVIE_MEDIA_TYPE,
+            str(error),
+            trigger=SYNC_TRIGGER_WEBHOOK,
+        )
+        log.exception(
+            "Radarr webhook failed: event_type={} tmdb_id={} error={}",
+            event_type,
+            tmdb_id,
+            error,
+        )
+        raise
+
+    log.info("Radarr webhook ignored: event_type={} tmdb_id={}", event_type, tmdb_id)
+    return RadarrWebhookResponse(
+        status="ignored",
+        event_type=event_type,
+        action="unsupported_event",
+        tmdb_id=tmdb_id,
+    )
+
+
+def _extract_radarr_webhook_tmdb_id(payload: RadarrWebhookPayload) -> int | None:
+    """Extract a movie TMDB ID from known Radarr webhook payload locations."""
+    movie = payload.movie or {}
+    data = payload.data or {}
+    candidates = [
+        movie.get("tmdbId"),
+        movie.get("tmdb_id"),
+        data.get("tmdbId"),
+        data.get("tmdb_id"),
+    ]
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+
+    return None
+
+
+def _upsert_radarr_owned_movie(database_session: Session, tmdb_id: int) -> None:
+    """Hydrate and upsert a single Radarr-owned movie row."""
+    synced_at = datetime.utcnow()
+    metadata = TmdbService().get_movie_metadata(tmdb_id)
+    owned_media = (
+        database_session.query(OwnedMedia)
+        .filter(
+            OwnedMedia.tmdb_id == tmdb_id,
+            OwnedMedia.media_type == MOVIE_MEDIA_TYPE,
+            OwnedMedia.source == RADARR_SOURCE,
+        )
+        .first()
+    )
+
+    if not owned_media:
+        owned_media = OwnedMedia(
+            tmdb_id=tmdb_id,
+            media_type=MOVIE_MEDIA_TYPE,
+            source=RADARR_SOURCE,
+            last_synced_at=synced_at,
+        )
+        database_session.add(owned_media)
+
+    owned_media.genre_ids = metadata.genre_ids or [0]
+    owned_media.poster_path = metadata.poster_path
+    owned_media.backdrop_path = metadata.backdrop_path
+    owned_media.release_date = metadata.release_date
+    owned_media.release_year = metadata.release_year
+    owned_media.runtime = metadata.runtime
+    owned_media.title = metadata.title
+    owned_media.last_synced_at = synced_at
+    owned_media.metadata_synced_at = synced_at
+
+
+def _delete_radarr_owned_movie(database_session: Session, tmdb_id: int) -> int:
+    """Delete one Radarr-owned movie row by TMDB ID."""
+    return (
+        database_session.query(OwnedMedia)
+        .filter(
+            OwnedMedia.tmdb_id == tmdb_id,
+            OwnedMedia.media_type == MOVIE_MEDIA_TYPE,
+            OwnedMedia.source == RADARR_SOURCE,
+        )
+        .delete(synchronize_session=False)
+    )
+
+
+def _is_radarr_upgrade_delete(payload: RadarrWebhookPayload) -> bool:
+    """Return whether a Radarr file-delete webhook is part of an upgrade."""
+    if payload.isUpgrade is True:
+        return True
+
+    delete_reason = (payload.deleteReason or "").lower()
+    return "upgrade" in delete_reason
+
+
+def _mark_webhook_sync_success(database_session: Session) -> None:
+    """Update Radarr movie sync status after a successful webhook action."""
+    sync_status = _get_or_create_sync_status(
+        database_session,
+        RADARR_SOURCE,
+        MOVIE_MEDIA_TYPE,
+    )
+    sync_status.status = SYNC_STATUS_SUCCESS
+    sync_status.trigger = SYNC_TRIGGER_WEBHOOK
+    sync_status.started_at = datetime.utcnow()
+    sync_status.finished_at = sync_status.started_at
+    sync_status.owned_count = _count_radarr_owned_movies(database_session)
+    sync_status.error_message = None
+
+
+def _count_radarr_owned_movies(database_session: Session) -> int:
+    """Count current Scenario-owned Radarr movies."""
+    return (
+        database_session.query(OwnedMedia)
+        .filter(
+            OwnedMedia.source == RADARR_SOURCE,
+            OwnedMedia.media_type == MOVIE_MEDIA_TYPE,
+        )
+        .count()
+    )
+
+
 def get_radarr_owned_movies_sync_status(
     database_session: Session,
 ) -> OwnedMediaSyncStatusResponse:
@@ -381,6 +594,7 @@ def _mark_sync_failed(
     source: str,
     media_type: str,
     error_message: str,
+    trigger: str | None = None,
 ) -> None:
     """
     Persist a failed sync status after rolling back sync data changes.
@@ -390,6 +604,7 @@ def _mark_sync_failed(
         source: Integration source.
         media_type: Synced media type.
         error_message: Failure message.
+        trigger: Optional sync trigger source.
     """
     _mark_sync_finished(
         database_session,
@@ -398,6 +613,9 @@ def _mark_sync_failed(
         SYNC_STATUS_FAILED,
         error_message=error_message,
     )
+    if trigger:
+        sync_status = _get_or_create_sync_status(database_session, source, media_type)
+        sync_status.trigger = trigger
     database_session.commit()
 
 

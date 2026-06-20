@@ -5,22 +5,28 @@ These routes expose Scenario's local owned media state and a manual Radarr sync
 action. Read endpoints never call Radarr/Sonarr in real time.
 """
 
+from secrets import compare_digest
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_database
+from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.models import User
 from app.schemas import (
     OwnedMediaResponse,
     OwnedMediaStatusResponse,
     OwnedMediaSyncStatusResponse,
+    RadarrWebhookPayload,
+    RadarrWebhookResponse,
 )
 from app.services.owned_media_service import (
     SyncAlreadyRunningError,
     get_owned_media,
     get_radarr_owned_movies_sync_status,
     get_owned_media_status,
+    handle_radarr_webhook,
     start_radarr_owned_movies_sync,
     sync_radarr_owned_movies_with_reserved_lock,
 )
@@ -71,6 +77,35 @@ def _run_radarr_owned_media_sync_background() -> None:
         sync_radarr_owned_movies_with_reserved_lock(database_session)
     finally:
         database_session.close()
+
+
+@router.post(
+    "/webhooks/radarr",
+    response_model=RadarrWebhookResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Handle Radarr owned media webhook",
+    description="Receive Radarr movie availability events and update owned media.",
+    responses={403: {"description": "Invalid webhook token"}},
+)
+def radarr_owned_media_webhook(
+    payload: RadarrWebhookPayload,
+    token: str = Query(..., description="Radarr webhook shared secret"),
+    database_session: Session = Depends(get_database),
+) -> RadarrWebhookResponse:
+    """
+    Handle Radarr webhook events without Scenario user authentication.
+
+    Radarr uses this endpoint to notify Scenario when a movie file is imported
+    or removed. The shared token protects the endpoint from unauthenticated
+    public writes while keeping Radarr configuration simple.
+    """
+    if not compare_digest(token, settings.RADARR_WEBHOOK_SECRET):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid webhook token",
+        )
+
+    return handle_radarr_webhook(payload, database_session)
 
 
 @router.get(

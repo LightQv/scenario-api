@@ -11,7 +11,7 @@ from app.schemas.bookmark import BookmarkCreate
 from app.schemas.view import ViewCreate, ViewResponse, ViewCountByType, ViewCountByYear, ViewRuntime
 from app.schemas.owned_media import (
     OwnedMediaResponse, OwnedMediaStatusResponse, OwnedMediaSyncResponse,
-    OwnedMediaSyncStatusResponse
+    OwnedMediaSyncStatusResponse, RadarrWebhookPayload, RadarrWebhookResponse
 )
 
 __all__ = [
@@ -23,5 +23,5 @@ __all__ = [
     "BookmarkCreate",
     "ViewCreate", "ViewResponse", "ViewCountByType", "ViewCountByYear", "ViewRuntime",
     "OwnedMediaResponse", "OwnedMediaStatusResponse", "OwnedMediaSyncResponse",
-    "OwnedMediaSyncStatusResponse"
+    "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse"
 ]

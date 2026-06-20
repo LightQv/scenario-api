@@ -4,6 +4,24 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class RadarrWebhookPayload(BaseModel):
+    eventType: str | None = None
+    movie: dict | None = None
+    movieFile: dict | None = None
+    isUpgrade: bool | None = None
+    deleteReason: str | None = None
+    data: dict | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class RadarrWebhookResponse(BaseModel):
+    status: str
+    event_type: str | None = None
+    action: str
+    tmdb_id: int | None = None
+
+
 class OwnedMediaResponse(BaseModel):
     id: UUID
     tmdb_id: int

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     TMDB_API_TOKEN: str
     RADARR_URL: str
     RADARR_API_KEY: str
+    RADARR_WEBHOOK_SECRET: str
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
     OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
     OWNED_MEDIA_SYNC_TIMEZONE: str = "Europe/Paris"
