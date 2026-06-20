@@ -6,6 +6,7 @@ table and provides cheap DB-backed availability checks for the mobile app.
 """
 
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from time import perf_counter
 
@@ -20,6 +21,7 @@ from app.schemas import (
     OwnedMediaSyncStatusResponse,
 )
 from app.services.radarr_service import RadarrService
+from app.services.tmdb_service import TmdbMovieMetadata, TmdbService
 
 RADARR_SOURCE = "RADARR"
 MOVIE_MEDIA_TYPE = "movie"
@@ -30,6 +32,7 @@ SYNC_STATUS_FAILED = "failed"
 SYNC_TRIGGER_MANUAL = "manual"
 SYNC_TRIGGER_SCHEDULED = "scheduled"
 STALE_RUNNING_SYNC_AFTER = timedelta(hours=2)
+TMDB_METADATA_WORKERS = 5
 _radarr_movie_sync_lock = Lock()
 
 
@@ -67,13 +70,86 @@ def sync_radarr_owned_movies(
         log.info("Owned media sync skipped: {} sync is already running", sync_label)
         raise SyncAlreadyRunningError(f"{sync_label} sync is already running")
 
-    started_at = perf_counter()
+    try:
+        return _sync_radarr_owned_movies(
+            database_session,
+            trigger=trigger,
+            mark_running=True,
+        )
+    finally:
+        _radarr_movie_sync_lock.release()
+
+
+def start_radarr_owned_movies_sync(
+    database_session: Session,
+    trigger: str = SYNC_TRIGGER_MANUAL,
+) -> OwnedMediaSyncStatusResponse:
+    """Reserve and mark a Radarr movie sync as running for background work.
+
+    Args:
+        database_session: Request database session.
+        trigger: Sync trigger source.
+
+    Returns:
+        OwnedMediaSyncStatusResponse: Running sync status.
+
+    Raises:
+        SyncAlreadyRunningError: If the same source/media type is already syncing.
+    """
+    sync_label = f"{RADARR_SOURCE} {MOVIE_MEDIA_TYPE}"
+
+    if not _radarr_movie_sync_lock.acquire(blocking=False):
+        log.info("Owned media sync skipped: {} sync is already running", sync_label)
+        raise SyncAlreadyRunningError(f"{sync_label} sync is already running")
 
     try:
         _mark_sync_running(database_session, RADARR_SOURCE, MOVIE_MEDIA_TYPE, trigger)
+        return get_radarr_owned_movies_sync_status(database_session)
+    except Exception:
+        _radarr_movie_sync_lock.release()
+        raise
+
+
+def sync_radarr_owned_movies_with_reserved_lock(
+    database_session: Session,
+    trigger: str = SYNC_TRIGGER_MANUAL,
+) -> OwnedMediaSyncResponse:
+    """Run a Radarr movie sync after ``start_radarr_owned_movies_sync``.
+
+    Args:
+        database_session: Background task database session.
+        trigger: Sync trigger source.
+
+    Returns:
+        OwnedMediaSyncResponse: Summary of the sync result.
+    """
+    try:
+        return _sync_radarr_owned_movies(
+            database_session,
+            trigger=trigger,
+            mark_running=False,
+        )
+    finally:
+        _radarr_movie_sync_lock.release()
+
+
+def _sync_radarr_owned_movies(
+    database_session: Session,
+    trigger: str,
+    mark_running: bool,
+) -> OwnedMediaSyncResponse:
+    """Sync Radarr owned movies with hydrated TMDB metadata."""
+    sync_label = f"{RADARR_SOURCE} {MOVIE_MEDIA_TYPE}"
+
+    started_at = perf_counter()
+
+    try:
+        if mark_running:
+            _mark_sync_running(database_session, RADARR_SOURCE, MOVIE_MEDIA_TYPE, trigger)
         log.info("Owned media sync started: {} trigger={}", sync_label, trigger)
         synced_at = datetime.utcnow()
         tmdb_ids = RadarrService().get_owned_movie_tmdb_ids()
+        movie_metadata = _fetch_movie_metadata(tmdb_ids)
 
         (
             database_session.query(OwnedMedia)
@@ -86,19 +162,27 @@ def sync_radarr_owned_movies(
 
         database_session.add_all(
             OwnedMedia(
-                tmdb_id=tmdb_id,
-                media_type=MOVIE_MEDIA_TYPE,
+                tmdb_id=metadata.tmdb_id,
+                media_type=metadata.media_type,
+                genre_ids=metadata.genre_ids or [0],
+                poster_path=metadata.poster_path,
+                backdrop_path=metadata.backdrop_path,
+                release_date=metadata.release_date,
+                release_year=metadata.release_year,
+                runtime=metadata.runtime,
+                title=metadata.title,
                 source=RADARR_SOURCE,
                 last_synced_at=synced_at,
+                metadata_synced_at=synced_at,
             )
-            for tmdb_id in tmdb_ids
+            for metadata in movie_metadata
         )
         _mark_sync_finished(
             database_session,
             RADARR_SOURCE,
             MOVIE_MEDIA_TYPE,
             SYNC_STATUS_SUCCESS,
-            owned_count=len(tmdb_ids),
+            owned_count=len(movie_metadata),
         )
         database_session.commit()
 
@@ -106,7 +190,7 @@ def sync_radarr_owned_movies(
         log.info(
             "Owned media sync completed: {} owned_count={} trigger={} duration={:.2f}s",
             sync_label,
-            len(tmdb_ids),
+            len(movie_metadata),
             trigger,
             duration_seconds,
         )
@@ -114,7 +198,7 @@ def sync_radarr_owned_movies(
         return OwnedMediaSyncResponse(
             source=RADARR_SOURCE,
             media_type=MOVIE_MEDIA_TYPE,
-            owned_count=len(tmdb_ids),
+            owned_count=len(movie_metadata),
             synced_at=synced_at,
         )
     except SyncAlreadyRunningError as error:
@@ -133,8 +217,38 @@ def sync_radarr_owned_movies(
             error,
         )
         raise
-    finally:
-        _radarr_movie_sync_lock.release()
+
+
+def _fetch_movie_metadata(tmdb_ids: list[int]) -> list[TmdbMovieMetadata]:
+    """Fetch TMDB movie metadata with bounded concurrency.
+
+    Args:
+        tmdb_ids: TMDB movie identifiers to hydrate.
+
+    Returns:
+        list[TmdbMovieMetadata]: Successfully hydrated movie metadata rows.
+    """
+    tmdb_service = TmdbService()
+    movie_metadata: list[TmdbMovieMetadata] = []
+
+    with ThreadPoolExecutor(max_workers=TMDB_METADATA_WORKERS) as executor:
+        futures = {
+            executor.submit(tmdb_service.get_movie_metadata, tmdb_id): tmdb_id
+            for tmdb_id in tmdb_ids
+        }
+
+        for future in as_completed(futures):
+            tmdb_id = futures[future]
+            try:
+                movie_metadata.append(future.result())
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                log.warning(
+                    "Owned media metadata skipped: tmdb_id={} error={}",
+                    tmdb_id,
+                    error,
+                )
+
+    return sorted(movie_metadata, key=lambda item: item.title.lower())
 
 
 def get_radarr_owned_movies_sync_status(

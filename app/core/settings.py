@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     # Media server integrations
+    TMDB_API_TOKEN: str
     RADARR_URL: str
     RADARR_API_KEY: str
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
