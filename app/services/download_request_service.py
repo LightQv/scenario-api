@@ -1,6 +1,7 @@
 """Download request service for Radarr movie requests."""
 
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -29,6 +30,11 @@ ACTIVE_DOWNLOAD_STATUSES = {
     DOWNLOAD_STATUS_SENT_TO_RADARR,
     DOWNLOAD_STATUS_SEARCHING,
     DOWNLOAD_STATUS_DOWNLOADING,
+}
+RETRYABLE_DOWNLOAD_STATUSES = {
+    DOWNLOAD_STATUS_FAILED,
+    DOWNLOAD_STATUS_NOT_FOUND,
+    DOWNLOAD_STATUS_CANCELLED,
 }
 
 
@@ -74,6 +80,9 @@ def request_radarr_movie_download(
             tag_labels=_get_radarr_tag_labels(metadata),
         )
         download_request.radarr_movie_id = _extract_radarr_movie_id(radarr_movie)
+        download_request.radarr_search_command_id = _extract_radarr_search_command_id(
+            radarr_movie,
+        )
         download_request.status = DOWNLOAD_STATUS_SEARCHING
         download_request.error_message = None
         _clear_queue_fields(download_request)
@@ -82,6 +91,74 @@ def request_radarr_movie_download(
         _mark_request_failed(database_session, download_request, str(error.detail))
     except Exception as error:
         _mark_request_failed(database_session, download_request, str(error))
+
+    return DownloadRequestResponse.model_validate(download_request)
+
+
+def retry_download_request(
+    request_id: UUID,
+    database_session: Session,
+) -> DownloadRequestResponse:
+    """Retry a failed, not-found, or cancelled Radarr movie request."""
+    download_request = _get_download_request_or_404(request_id, database_session)
+    if download_request.status not in RETRYABLE_DOWNLOAD_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Download request cannot be retried in its current state",
+        )
+
+    metadata = TmdbService().get_movie_metadata(download_request.tmdb_id)
+    _apply_metadata(download_request, metadata)
+    download_request.status = DOWNLOAD_STATUS_REQUESTED
+    download_request.error_message = None
+    _clear_queue_fields(download_request)
+    database_session.commit()
+
+    try:
+        radarr_movie = RadarrService().add_movie_and_search(
+            download_request.tmdb_id,
+            tag_labels=_get_radarr_tag_labels(metadata),
+        )
+        download_request.radarr_movie_id = _extract_radarr_movie_id(radarr_movie)
+        download_request.radarr_search_command_id = _extract_radarr_search_command_id(
+            radarr_movie,
+        )
+        download_request.status = DOWNLOAD_STATUS_SEARCHING
+        download_request.error_message = None
+        _clear_queue_fields(download_request)
+        database_session.commit()
+    except HTTPException as error:
+        _mark_request_failed(database_session, download_request, str(error.detail))
+    except Exception as error:
+        _mark_request_failed(database_session, download_request, str(error))
+
+    return DownloadRequestResponse.model_validate(download_request)
+
+
+def cancel_download_request(
+    request_id: UUID,
+    database_session: Session,
+) -> DownloadRequestResponse:
+    """Cancel a local request and remove its active Radarr queue/movie state."""
+    download_request = _get_download_request_or_404(request_id, database_session)
+    radarr_service = RadarrService()
+
+    queue_record = _find_queue_record_for_request(
+        download_request,
+        radarr_service.get_queue(),
+    )
+    if queue_record:
+        queue_item_id = _safe_int(queue_record.get("id"))
+        if queue_item_id is not None:
+            radarr_service.delete_queue_item(queue_item_id)
+
+    if download_request.radarr_movie_id is not None:
+        radarr_service.delete_movie_if_unavailable(download_request.radarr_movie_id)
+
+    download_request.status = DOWNLOAD_STATUS_CANCELLED
+    download_request.error_message = None
+    _clear_queue_fields(download_request)
+    database_session.commit()
 
     return DownloadRequestResponse.model_validate(download_request)
 
@@ -164,6 +241,34 @@ def mark_radarr_movie_requests_available(
     return int(updated_count)
 
 
+def mark_radarr_movie_request_grabbed(
+    tmdb_id: int,
+    payload_data: dict,
+    database_session: Session,
+) -> int:
+    """Mark matching active requests as downloading after Radarr grabs a release."""
+    download_requests = (
+        database_session.query(DownloadRequest)
+        .filter(
+            DownloadRequest.tmdb_id == tmdb_id,
+            DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
+            DownloadRequest.source == RADARR_SOURCE,
+            DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
+        )
+        .all()
+    )
+
+    for download_request in download_requests:
+        download_request.status = DOWNLOAD_STATUS_DOWNLOADING
+        download_request.error_message = None
+        download_request.download_title = _extract_grab_title(payload_data)
+        download_request.quality = _extract_grab_quality(payload_data)
+        download_request.tracked_download_status = "ok"
+        download_request.tracked_download_state = "grabbed"
+
+    return len(download_requests)
+
+
 def reconcile_download_requests(database_session: Session) -> None:
     """Refresh active download requests from owned media and Radarr queue."""
     active_requests = (
@@ -187,7 +292,8 @@ def reconcile_download_requests(database_session: Session) -> None:
 
     if pending_requests:
         try:
-            queue_records = RadarrService().get_queue()
+            radarr_service = RadarrService()
+            queue_records = radarr_service.get_queue()
         except HTTPException:
             database_session.commit()
             return
@@ -198,6 +304,8 @@ def reconcile_download_requests(database_session: Session) -> None:
                 queue_record = queue_by_radarr_id.get(download_request.radarr_movie_id)
             if queue_record:
                 _apply_queue_record(download_request, queue_record)
+            else:
+                _apply_history_or_command_state(download_request, radarr_service)
 
     database_session.commit()
 
@@ -301,6 +409,130 @@ def _apply_queue_record(
         download_request.error_message = None
 
 
+def _apply_history_or_command_state(
+    download_request: DownloadRequest,
+    radarr_service: RadarrService,
+) -> None:
+    """Use Radarr history/command state when a request is absent from queue."""
+    try:
+        history_records = radarr_service.get_history()
+    except HTTPException:
+        history_records = []
+
+    history_record = _find_history_record_for_request(
+        download_request,
+        history_records,
+    )
+    if history_record:
+        event_type = str(history_record.get("eventType") or "").lower()
+        if event_type in {"grabbed", "downloadfolderimported", "moviefileimported"}:
+            download_request.status = DOWNLOAD_STATUS_DOWNLOADING
+            download_request.download_title = history_record.get("sourceTitle")
+            download_request.quality = _extract_queue_quality(history_record)
+            download_request.error_message = None
+            return
+        if event_type in {"downloadfailed", "moviefiledeleted"}:
+            download_request.status = DOWNLOAD_STATUS_FAILED
+            download_request.error_message = "Radarr reported a failed download"
+            return
+
+    if _search_command_finished(download_request, radarr_service):
+        download_request.status = DOWNLOAD_STATUS_NOT_FOUND
+        download_request.error_message = None
+
+
+def _search_command_finished(
+    download_request: DownloadRequest,
+    radarr_service: RadarrService,
+) -> bool:
+    """Return whether Radarr says the tracked search command completed."""
+    command_id = download_request.radarr_search_command_id
+    if command_id is None:
+        return False
+
+    command = radarr_service.get_command(command_id)
+    if not command:
+        return False
+
+    status_value = str(command.get("status") or "").lower()
+    state_value = str(command.get("state") or "").lower()
+    return status_value in {"completed", "failed"} or state_value in {
+        "completed",
+        "failed",
+    }
+
+
+def _find_queue_record_for_request(
+    download_request: DownloadRequest,
+    queue_records: list[dict],
+) -> dict | None:
+    """Find the Radarr queue record matching a local request."""
+    queue_by_tmdb_id, queue_by_radarr_id = _index_queue_records(queue_records)
+    queue_record = queue_by_tmdb_id.get(download_request.tmdb_id)
+    if queue_record:
+        return queue_record
+    if download_request.radarr_movie_id is None:
+        return None
+    return queue_by_radarr_id.get(download_request.radarr_movie_id)
+
+
+def _find_history_record_for_request(
+    download_request: DownloadRequest,
+    history_records: list[dict],
+) -> dict | None:
+    """Find the most recent Radarr history record matching a local request."""
+    for history_record in history_records:
+        movie = history_record.get("movie") or {}
+        tmdb_id = _safe_int(movie.get("tmdbId"))
+        radarr_movie_id = _safe_int(movie.get("id") or history_record.get("movieId"))
+        if tmdb_id == download_request.tmdb_id:
+            return history_record
+        if (
+            download_request.radarr_movie_id is not None
+            and radarr_movie_id == download_request.radarr_movie_id
+        ):
+            return history_record
+    return None
+
+
+def _get_download_request_or_404(
+    request_id: UUID,
+    database_session: Session,
+) -> DownloadRequest:
+    """Return a download request or raise a 404 HTTP error."""
+    download_request = (
+        database_session.query(DownloadRequest)
+        .filter(DownloadRequest.id == request_id)
+        .first()
+    )
+    if not download_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Download request not found",
+        )
+    return download_request
+
+
+def _extract_grab_title(payload_data: dict) -> str | None:
+    """Extract release title from a Radarr grab webhook payload."""
+    release = payload_data.get("release") or {}
+    return (
+        payload_data.get("releaseTitle")
+        or payload_data.get("sourceTitle")
+        or release.get("releaseTitle")
+        or release.get("title")
+    )
+
+
+def _extract_grab_quality(payload_data: dict) -> str | None:
+    """Extract quality name from a Radarr grab webhook payload."""
+    quality = payload_data.get("quality") or {}
+    if isinstance(quality, str):
+        return quality
+    nested_quality = quality.get("quality") or {}
+    return nested_quality.get("name") or quality.get("name")
+
+
 def _mark_request_available(download_request: DownloadRequest) -> None:
     """Mark one request as available and clear transient queue details."""
     download_request.status = DOWNLOAD_STATUS_AVAILABLE
@@ -402,6 +634,11 @@ def _extract_radarr_movie_id(radarr_movie: dict) -> int | None:
         return int(radarr_movie_id)
     except (TypeError, ValueError):
         return None
+
+
+def _extract_radarr_search_command_id(radarr_movie: dict) -> int | None:
+    """Extract Scenario's tracked Radarr search command ID from a movie response."""
+    return _safe_int(radarr_movie.get("_scenario_search_command_id"))
 
 
 def _mark_request_failed(

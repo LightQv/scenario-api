@@ -25,6 +25,7 @@ from app.schemas import (
 from app.services.radarr_service import RadarrService
 from app.services.tmdb_service import TmdbMovieMetadata, TmdbService
 from app.services.download_request_service import mark_radarr_movie_requests_available
+from app.services.download_request_service import mark_radarr_movie_request_grabbed
 
 RADARR_SOURCE = "RADARR"
 MOVIE_MEDIA_TYPE = "movie"
@@ -40,6 +41,7 @@ TMDB_METADATA_WORKERS = 5
 _radarr_movie_sync_lock = Lock()
 RADARR_IMPORT_EVENTS = {"download", "moviefileimport", "fileimport"}
 RADARR_DELETE_EVENTS = {"moviedelete", "moviefiledelete"}
+RADARR_GRAB_EVENTS = {"grab", "downloadgrab"}
 
 
 class SyncAlreadyRunningError(Exception):
@@ -311,6 +313,25 @@ def handle_radarr_webhook(
                 status="success",
                 event_type=event_type,
                 action="upserted",
+                tmdb_id=tmdb_id,
+            )
+
+        if normalized_event_type in RADARR_GRAB_EVENTS:
+            updated_requests = mark_radarr_movie_request_grabbed(
+                tmdb_id,
+                payload.model_dump(mode="json"),
+                database_session,
+            )
+            database_session.commit()
+            log.info(
+                "Radarr webhook grabbed movie release: tmdb_id={} updated_requests={}",
+                tmdb_id,
+                updated_requests,
+            )
+            return RadarrWebhookResponse(
+                status="success",
+                event_type=event_type,
+                action="grabbed",
                 tmdb_id=tmdb_id,
             )
 

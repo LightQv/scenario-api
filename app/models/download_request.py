@@ -36,6 +36,7 @@ class DownloadRequest(Base):
     source = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False, index=True)
     radarr_movie_id = Column(Integer, nullable=True)
+    radarr_search_command_id = Column(Integer, nullable=True)
     genre_ids = Column(ARRAY(Integer), default=[0], nullable=False)
     poster_path = Column(String, nullable=False, default="")
     backdrop_path = Column(String, nullable=False, default="")

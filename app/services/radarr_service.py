@@ -90,22 +90,32 @@ class RadarrService:
                 existing_movie = self._ensure_movie_tags(existing_movie, tag_ids)
             radarr_movie_id = existing_movie.get("id")
             if radarr_movie_id:
-                self.search_movie(int(radarr_movie_id))
+                command = self.search_movie(int(radarr_movie_id))
+                existing_movie["_scenario_search_command_id"] = self.extract_command_id(
+                    command,
+                )
             return existing_movie
 
         movie = self.lookup_movie_by_tmdb_id(tmdb_id)
 
         try:
-            return self._client().movie.add(
+            added_movie = self._client().movie.add(
                 movie=movie,
                 root_dir=settings.RADARR_ROOT_FOLDER_PATH,
                 quality_profile_id=settings.RADARR_QUALITY_PROFILE_ID,
                 monitored=True,
-                search_for_movie=True,
+                search_for_movie=False,
                 monitor="movieOnly",
                 minimum_availability=settings.RADARR_MINIMUM_AVAILABILITY,
                 tags=tag_ids or None,
             )
+            radarr_movie_id = added_movie.get("id")
+            if radarr_movie_id:
+                command = self.search_movie(int(radarr_movie_id))
+                added_movie["_scenario_search_command_id"] = self.extract_command_id(
+                    command,
+                )
+            return added_movie
         except Exception as error:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -166,6 +176,80 @@ class RadarrService:
             )
 
         return records
+
+    def delete_queue_item(
+        self,
+        queue_item_id: int,
+        remove_from_client: bool = True,
+        blocklist: bool = True,
+    ) -> None:
+        """Remove a Radarr queue item and optionally remove it from the client."""
+        try:
+            self._client().queue.delete(
+                queue_item_id,
+                remove_from_client=remove_from_client,
+                blocklist=blocklist,
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to remove Radarr queue item",
+            ) from error
+
+    def delete_movie_if_unavailable(self, radarr_movie_id: int) -> bool:
+        """Remove a Radarr movie only when it has no imported file."""
+        try:
+            movie = self._client().movie.get(item_id=radarr_movie_id)
+            if not isinstance(movie, dict) or movie.get("hasFile") is True:
+                return False
+            self._client().movie.delete(
+                radarr_movie_id,
+                delete_files=False,
+                add_exclusion=False,
+            )
+            return True
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to remove Radarr movie",
+            ) from error
+
+    def get_command(self, command_id: int) -> dict[str, Any] | None:
+        """Return a Radarr command by ID, or None when Radarr no longer exposes it."""
+        try:
+            command = self._client().command.get(item_id=command_id)
+        except Exception:
+            return None
+        return command if isinstance(command, dict) else None
+
+    def get_history(self, page_size: int = 100) -> list[dict[str, Any]]:
+        """Return recent Radarr history records."""
+        try:
+            payload = self._client().history.get(
+                page=1,
+                page_size=page_size,
+                sort_key="date",
+                sort_dir="descending",
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to fetch Radarr history",
+            ) from error
+
+        records = payload.get("records", []) if isinstance(payload, dict) else []
+        return records if isinstance(records, list) else []
+
+    @staticmethod
+    def extract_command_id(command: dict[str, Any] | None) -> int | None:
+        """Extract a Radarr command ID from a command response."""
+        if not command:
+            return None
+        command_id = command.get("id")
+        try:
+            return int(command_id)
+        except (TypeError, ValueError):
+            return None
 
     def _resolve_tag_ids(self, tag_labels: list[str]) -> list[int]:
         """Return Radarr tag IDs, creating missing tags when necessary."""

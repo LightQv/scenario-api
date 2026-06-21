@@ -22,6 +22,7 @@ class DownloadRequestResponse(BaseModel):
     source: str
     status: str
     radarr_movie_id: int | None = None
+    radarr_search_command_id: int | None = None
     genre_ids: list[int]
     poster_path: str
     backdrop_path: str
