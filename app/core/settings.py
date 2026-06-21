@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str
     SMTP_USE_TLS: bool = True
 
+    # Media server integrations
+    TMDB_API_TOKEN: str
+    RADARR_URL: str
+    RADARR_API_KEY: str
+    RADARR_WEBHOOK_SECRET: str
+    RADARR_ROOT_FOLDER_PATH: str
+    RADARR_QUALITY_PROFILE_ID: int
+    RADARR_MINIMUM_AVAILABILITY: str = "released"
+    OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
+    OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
+    OWNED_MEDIA_SYNC_TIMEZONE: str = "Europe/Paris"
+
     # Security and validation settings
     PASSWORD_MIN_LENGTH: int = 7
     PASSWORD_MAX_LENGTH: int = 30

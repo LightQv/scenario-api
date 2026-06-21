@@ -6,18 +6,38 @@ exception handlers, and route configurations. It serves as the entry point
 for the Scenario API application.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import setup_cors
 from app.core.settings import settings
 from app.api.v1.router import main_router
+from app.services.owned_media_scheduler import owned_media_scheduler
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """
+    Manage application startup and shutdown background services.
+
+    Yields:
+        None: Control to FastAPI while background services are running.
+    """
+    owned_media_scheduler.start()
+    try:
+        yield
+    finally:
+        await owned_media_scheduler.stop()
 
 # Create the FastAPI application instance
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     debug=settings.DEBUG,
+    lifespan=lifespan,
     description="""
     🎬 **Scenario API** - A modern FastAPI application for managing movie and TV show watchlists.
 
