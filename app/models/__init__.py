@@ -4,6 +4,7 @@ from app.models.media import Media
 from app.models.view import View
 from app.models.owned_media import OwnedMedia
 from app.models.integration_sync_status import IntegrationSyncStatus
+from app.models.download_request import DownloadRequest
 
 __all__ = [
     "User",
@@ -12,4 +13,5 @@ __all__ = [
     "View",
     "OwnedMedia",
     "IntegrationSyncStatus",
+    "DownloadRequest",
 ]

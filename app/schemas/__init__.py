@@ -13,6 +13,9 @@ from app.schemas.owned_media import (
     OwnedMediaResponse, OwnedMediaStatusResponse, OwnedMediaSyncResponse,
     OwnedMediaSyncStatusResponse, RadarrWebhookPayload, RadarrWebhookResponse
 )
+from app.schemas.download_request import (
+    DownloadRequestResponse, RadarrMovieDownloadCreate
+)
 
 __all__ = [
     "UserRegister", "UserLogin", "PasswordReset", "ForgottenPassword", "Token",
@@ -23,5 +26,6 @@ __all__ = [
     "BookmarkCreate",
     "ViewCreate", "ViewResponse", "ViewCountByType", "ViewCountByYear", "ViewRuntime",
     "OwnedMediaResponse", "OwnedMediaStatusResponse", "OwnedMediaSyncResponse",
-    "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse"
+    "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse",
+    "DownloadRequestResponse", "RadarrMovieDownloadCreate"
 ]

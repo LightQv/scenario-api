@@ -24,6 +24,7 @@ from app.schemas import (
 )
 from app.services.radarr_service import RadarrService
 from app.services.tmdb_service import TmdbMovieMetadata, TmdbService
+from app.services.download_request_service import mark_radarr_movie_requests_available
 
 RADARR_SOURCE = "RADARR"
 MOVIE_MEDIA_TYPE = "movie"
@@ -295,9 +296,17 @@ def handle_radarr_webhook(
     try:
         if normalized_event_type in RADARR_IMPORT_EVENTS:
             _upsert_radarr_owned_movie(database_session, tmdb_id)
+            updated_requests = mark_radarr_movie_requests_available(
+                tmdb_id,
+                database_session,
+            )
             _mark_webhook_sync_success(database_session)
             database_session.commit()
-            log.info("Radarr webhook imported owned movie: tmdb_id={}", tmdb_id)
+            log.info(
+                "Radarr webhook imported owned movie: tmdb_id={} updated_requests={}",
+                tmdb_id,
+                updated_requests,
+            )
             return RadarrWebhookResponse(
                 status="success",
                 event_type=event_type,

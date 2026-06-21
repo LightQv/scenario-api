@@ -19,6 +19,8 @@ class TmdbMovieMetadata:
     release_year: str
     runtime: int
     title: str
+    original_language: str = ""
+    origin_country: tuple[str, ...] = ()
     media_type: str = "movie"
 
 
@@ -51,6 +53,8 @@ class TmdbService:
             release_year=release_date[:4] if release_date else "",
             runtime=data.get("runtime") or 0,
             title=data.get("title") or data.get("original_title") or "",
+            original_language=data.get("original_language") or "",
+            origin_country=tuple(data.get("origin_country") or []),
         )
 
     def _request_json(self, path: str) -> dict:
