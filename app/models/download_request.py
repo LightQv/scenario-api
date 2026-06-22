@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import ARRAY, Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import ARRAY, BigInteger, Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -48,8 +48,8 @@ class DownloadRequest(Base):
     download_title = Column(String, nullable=True)
     download_client = Column(String, nullable=True)
     quality = Column(String, nullable=True)
-    size = Column(Integer, nullable=True)
-    size_left = Column(Integer, nullable=True)
+    size = Column(BigInteger, nullable=True)
+    size_left = Column(BigInteger, nullable=True)
     time_left = Column(String, nullable=True)
     tracked_download_status = Column(String, nullable=True)
     tracked_download_state = Column(String, nullable=True)
