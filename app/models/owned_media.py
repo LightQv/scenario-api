@@ -7,7 +7,7 @@ on the home server, as reported by integrations such as Radarr and Sonarr.
 
 import uuid
 
-from sqlalchemy import ARRAY, Column, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import ARRAY, Column, DateTime, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.database.base import Base
@@ -35,18 +35,39 @@ class OwnedMedia(Base):
 
     __tablename__ = "owned_media_model"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_owned_media_movie_tmdb_type_source",
             "tmdb_id",
             "media_type",
             "source",
-            name="uq_owned_media_tmdb_type_source",
+            unique=True,
+            postgresql_where=text("scope = 'movie'"),
+        ),
+        Index(
+            "uq_owned_media_episode_tmdb_type_source_season_episode",
+            "tmdb_id",
+            "media_type",
+            "source",
+            "season_number",
+            "episode_number",
+            unique=True,
+            postgresql_where=text("scope = 'episode'"),
         ),
         Index("idx_owned_media_tmdb_type", "tmdb_id", "media_type"),
+        Index("idx_owned_media_tmdb_type_source", "tmdb_id", "media_type", "source"),
+        Index("idx_owned_media_tv_episode", "tmdb_id", "season_number", "episode_number"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tmdb_id = Column(Integer, nullable=False)
     media_type = Column(String(50), nullable=False)
+    scope = Column(String(50), nullable=False, default="movie")
+    tvdb_id = Column(Integer, nullable=True)
+    sonarr_series_id = Column(Integer, nullable=True)
+    season_number = Column(Integer, nullable=True)
+    episode_number = Column(Integer, nullable=True)
+    episode_title = Column(String, nullable=True)
+    episode_air_date = Column(String, nullable=True)
     genre_ids = Column(ARRAY(Integer), default=[0], nullable=False)
     poster_path = Column(String, nullable=False, default="")
     backdrop_path = Column(String, nullable=False, default="")
@@ -62,5 +83,5 @@ class OwnedMedia(Base):
         """Return user-friendly string representation."""
         return (
             f"OwnedMedia(tmdb_id='{self.tmdb_id}', "
-            f"type='{self.media_type}', source='{self.source}')"
+            f"type='{self.media_type}', scope='{self.scope}', source='{self.source}')"
         )

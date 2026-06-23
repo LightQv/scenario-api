@@ -11,10 +11,13 @@ from app.schemas.bookmark import BookmarkCreate
 from app.schemas.view import ViewCreate, ViewResponse, ViewCountByType, ViewCountByYear, ViewRuntime
 from app.schemas.owned_media import (
     OwnedMediaResponse, OwnedMediaStatusResponse, OwnedMediaSyncResponse,
-    OwnedMediaSyncStatusResponse, RadarrWebhookPayload, RadarrWebhookResponse
+    OwnedMediaSyncStatusResponse, RadarrWebhookPayload, RadarrWebhookResponse,
+    SonarrWebhookPayload, SonarrWebhookResponse, TvAvailabilityResponse,
+    TvEpisodeAvailabilityResponse, TvSeasonAvailabilityResponse
 )
 from app.schemas.download_request import (
-    DownloadRequestResponse, RadarrMovieDownloadCreate
+    DownloadRequestResponse, RadarrMovieDownloadCreate, SonarrSeasonDownloadCreate,
+    SonarrSeriesDownloadCreate
 )
 
 __all__ = [
@@ -27,5 +30,8 @@ __all__ = [
     "ViewCreate", "ViewResponse", "ViewCountByType", "ViewCountByYear", "ViewRuntime",
     "OwnedMediaResponse", "OwnedMediaStatusResponse", "OwnedMediaSyncResponse",
     "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse",
-    "DownloadRequestResponse", "RadarrMovieDownloadCreate"
+    "SonarrWebhookPayload", "SonarrWebhookResponse", "TvAvailabilityResponse",
+    "TvEpisodeAvailabilityResponse", "TvSeasonAvailabilityResponse",
+    "DownloadRequestResponse", "RadarrMovieDownloadCreate", "SonarrSeasonDownloadCreate",
+    "SonarrSeriesDownloadCreate"
 ]
