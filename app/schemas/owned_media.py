@@ -15,11 +15,34 @@ class RadarrWebhookPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SonarrWebhookPayload(BaseModel):
+    eventType: str | None = None
+    series: dict | None = None
+    episodes: list[dict] | None = None
+    episode: dict | None = None
+    episodeFile: dict | None = None
+    release: dict | None = None
+    isUpgrade: bool | None = None
+    deleteReason: str | None = None
+    data: dict | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class RadarrWebhookResponse(BaseModel):
     status: str
     event_type: str | None = None
     action: str
     tmdb_id: int | None = None
+
+
+class SonarrWebhookResponse(BaseModel):
+    status: str
+    event_type: str | None = None
+    action: str
+    tmdb_id: int | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
 
 
 class OwnedMediaResponse(BaseModel):
@@ -33,6 +56,13 @@ class OwnedMediaResponse(BaseModel):
     runtime: int
     title: str
     media_type: str
+    scope: str
+    tvdb_id: int | None = None
+    sonarr_series_id: int | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    episode_title: str | None = None
+    episode_air_date: str | None = None
     source: str
     last_synced_at: datetime
     metadata_synced_at: datetime | None = None
@@ -44,6 +74,9 @@ class OwnedMediaStatusResponse(BaseModel):
     tmdb_id: int
     media_type: str
     owned: bool
+    status: str | None = None
+    available_episode_count: int | None = None
+    aired_episode_count: int | None = None
 
 
 class OwnedMediaSyncResponse(BaseModel):
@@ -64,3 +97,25 @@ class OwnedMediaSyncStatusResponse(BaseModel):
     error_message: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TvEpisodeAvailabilityResponse(BaseModel):
+    episode_number: int
+    status: str
+
+
+class TvSeasonAvailabilityResponse(BaseModel):
+    season_number: int
+    status: str
+    available_episode_count: int
+    aired_episode_count: int
+    episodes: list[TvEpisodeAvailabilityResponse] = []
+
+
+class TvAvailabilityResponse(BaseModel):
+    tmdb_id: int
+    media_type: str = "tv"
+    status: str
+    available_episode_count: int
+    aired_episode_count: int
+    seasons: list[TvSeasonAvailabilityResponse]

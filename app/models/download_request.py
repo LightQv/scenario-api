@@ -33,10 +33,17 @@ class DownloadRequest(Base):
     )
     tmdb_id = Column(Integer, nullable=False)
     media_type = Column(String(50), nullable=False)
+    scope = Column(String(50), nullable=False, default="movie")
     source = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False, index=True)
     radarr_movie_id = Column(Integer, nullable=True)
     radarr_search_command_id = Column(Integer, nullable=True)
+    tvdb_id = Column(Integer, nullable=True)
+    sonarr_series_id = Column(Integer, nullable=True)
+    sonarr_search_command_id = Column(Integer, nullable=True)
+    sonarr_episode_id = Column(Integer, nullable=True)
+    season_number = Column(Integer, nullable=True)
+    episode_number = Column(Integer, nullable=True)
     genre_ids = Column(ARRAY(Integer), default=[0], nullable=False)
     poster_path = Column(String, nullable=False, default="")
     backdrop_path = Column(String, nullable=False, default="")
@@ -61,5 +68,5 @@ class DownloadRequest(Base):
         """Return user-friendly string representation."""
         return (
             f"DownloadRequest(tmdb_id='{self.tmdb_id}', type='{self.media_type}', "
-            f"status='{self.status}')"
+            f"scope='{self.scope}', status='{self.status}')"
         )

@@ -12,6 +12,19 @@ class RadarrMovieDownloadCreate(BaseModel):
     tmdb_id: int = Field(gt=0, description="TMDB movie identifier")
 
 
+class SonarrSeriesDownloadCreate(BaseModel):
+    """Request body for creating a Sonarr series download request."""
+
+    tmdb_id: int = Field(gt=0, description="TMDB TV series identifier")
+
+
+class SonarrSeasonDownloadCreate(BaseModel):
+    """Request body for creating a Sonarr season download request."""
+
+    tmdb_id: int = Field(gt=0, description="TMDB TV series identifier")
+    season_number: int = Field(ge=1, description="Regular season number")
+
+
 class DownloadRequestResponse(BaseModel):
     """Download request response returned to the mobile app."""
 
@@ -19,10 +32,17 @@ class DownloadRequestResponse(BaseModel):
     user_id: UUID | None = None
     tmdb_id: int
     media_type: str
+    scope: str
     source: str
     status: str
     radarr_movie_id: int | None = None
     radarr_search_command_id: int | None = None
+    tvdb_id: int | None = None
+    sonarr_series_id: int | None = None
+    sonarr_search_command_id: int | None = None
+    sonarr_episode_id: int | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
     genre_ids: list[int]
     poster_path: str
     backdrop_path: str
