@@ -728,7 +728,7 @@ def process_sonarr_download_request(request_id: UUID) -> None:
             season_number=season_number,
             is_anime=is_anime,
             use_on_air_profile=use_on_air_profile,
-            tag_labels=_get_sonarr_tag_labels(metadata),
+            tag_labels=_get_sonarr_tag_labels(metadata, use_on_air_profile),
         )
         download_request.tvdb_id = tvdb_id
         download_request.sonarr_series_id = _extract_sonarr_series_id(sonarr_series)
@@ -877,11 +877,33 @@ def _get_radarr_tag_labels(metadata: TmdbMovieMetadata) -> list[str]:
     return []
 
 
-def _get_sonarr_tag_labels(metadata: TmdbTvMetadata) -> list[str]:
+def _get_sonarr_tag_labels(
+    metadata: TmdbTvMetadata,
+    use_on_air_profile: bool,
+) -> list[str]:
     """Return Sonarr tags Scenario should apply for a TV request."""
+    tag_labels: list[str] = []
+
     if _is_anime_tv(metadata):
-        return [settings.SONARR_ANIME_TAG_LABEL]
-    return []
+        _append_tag_label(tag_labels, settings.SONARR_ANIME_TAG_LABEL)
+        return tag_labels
+
+    if use_on_air_profile:
+        _append_tag_label(tag_labels, settings.SONARR_ON_AIR_TAG_LABEL)
+    else:
+        _append_tag_label(tag_labels, settings.SONARR_COMPLETE_TAG_LABEL)
+
+    return tag_labels
+
+
+def _append_tag_label(tag_labels: list[str], label: str | None) -> None:
+    """Append a non-empty tag label once, preserving configured casing."""
+    normalized_label = str(label or "").strip()
+    if not normalized_label:
+        return
+    if normalized_label.lower() in {tag_label.lower() for tag_label in tag_labels}:
+        return
+    tag_labels.append(normalized_label)
 
 
 def _is_anime_movie(metadata: TmdbMovieMetadata) -> bool:

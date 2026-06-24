@@ -394,7 +394,10 @@ class SonarrService:
         """Resolve Sonarr tag labels to tag IDs, creating missing tags."""
         tag_ids: list[int] = []
         for label in tag_labels:
-            tag_id = self._get_or_create_tag_id(label)
+            normalized_label = str(label or "").strip()
+            if not normalized_label:
+                continue
+            tag_id = self._get_or_create_tag_id(normalized_label)
             if tag_id is not None:
                 tag_ids.append(tag_id)
         return tag_ids
