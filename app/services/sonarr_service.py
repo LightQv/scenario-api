@@ -12,9 +12,43 @@ from app.core.settings import settings
 class SonarrService:
     """Client wrapper for Sonarr TV library operations."""
 
-    def __init__(self, url: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        root_folder_path: str | None = None,
+        anime_root_folder_path: str | None = None,
+        quality_profile_id: int | None = None,
+        on_air_quality_profile_id: int | None = None,
+        complete_quality_profile_id: int | None = None,
+        anime_quality_profile_id: int | None = None,
+        language_profile_id: int | None = None,
+        anime_language_profile_id: int | None = None,
+        series_type: str | None = None,
+        anime_series_type: str | None = None,
+        monitor_mode: str | None = None,
+        season_folder: bool | None = None,
+        use_anime_series_type: bool | None = None,
+    ):
         self.url: str = (url or settings.SONARR_URL).rstrip("/")
         self.api_key: str = api_key or settings.SONARR_API_KEY
+        self.root_folder_path: str = root_folder_path or settings.SONARR_ROOT_FOLDER_PATH
+        self.anime_root_folder_path: str = anime_root_folder_path or settings.SONARR_ANIME_ROOT_FOLDER_PATH
+        self.quality_profile_id: int = quality_profile_id or settings.SONARR_QUALITY_PROFILE_ID
+        self.on_air_quality_profile_id: int | None = on_air_quality_profile_id or settings.SONARR_ON_AIR_QUALITY_PROFILE_ID
+        self.complete_quality_profile_id: int | None = complete_quality_profile_id or settings.SONARR_COMPLETE_QUALITY_PROFILE_ID
+        self.anime_quality_profile_id: int | None = anime_quality_profile_id or settings.SONARR_ANIME_QUALITY_PROFILE_ID
+        self.language_profile_id: int | None = language_profile_id or settings.SONARR_LANGUAGE_PROFILE_ID
+        self.anime_language_profile_id: int | None = anime_language_profile_id or settings.SONARR_ANIME_LANGUAGE_PROFILE_ID
+        self.series_type: str = series_type or settings.SONARR_SERIES_TYPE
+        self.anime_series_type: str = anime_series_type or settings.SONARR_ANIME_SERIES_TYPE
+        self.monitor_mode: str = monitor_mode or settings.SONARR_MONITOR_MODE
+        self.season_folder: bool = settings.SONARR_SEASON_FOLDER if season_folder is None else season_folder
+        self.use_anime_series_type: bool = (
+            settings.SONARR_USE_ANIME_SERIES_TYPE
+            if use_anime_series_type is None
+            else use_anime_series_type
+        )
 
     def get_series(self) -> list[dict[str, Any]]:
         """Fetch series currently known by Sonarr."""
@@ -115,7 +149,7 @@ class SonarrService:
         series = self.lookup_series_by_tvdb_id(tvdb_id)
         tag_ids = self._resolve_tag_ids(tag_labels or [])
         config = self._profile_config(is_anime, use_on_air_profile)
-        monitor_mode = "missing" if season_number is not None else settings.SONARR_MONITOR_MODE
+        monitor_mode = "missing" if season_number is not None else self.monitor_mode
         self._apply_new_series_season_monitoring(series, season_number)
         payload = {
             **series,
@@ -124,7 +158,7 @@ class SonarrService:
             "qualityProfileId": config["qualityProfileId"],
             "monitored": True,
             "monitor": monitor_mode,
-            "seasonFolder": settings.SONARR_SEASON_FOLDER,
+            "seasonFolder": self.season_folder,
             "addOptions": {
                 "monitor": monitor_mode,
                 "searchForMissingEpisodes": False,
@@ -417,28 +451,27 @@ class SonarrService:
             return None
         return _safe_int(created_tag.get("id"))
 
-    @staticmethod
-    def _profile_config(is_anime: bool, use_on_air_profile: bool = False) -> dict[str, Any]:
+    def _profile_config(self, is_anime: bool, use_on_air_profile: bool = False) -> dict[str, Any]:
         """Return Sonarr profile config for a normal or anime series."""
-        quality_profile_id = settings.SONARR_QUALITY_PROFILE_ID
-        if not is_anime and use_on_air_profile and settings.SONARR_ON_AIR_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_ON_AIR_QUALITY_PROFILE_ID
-        if not is_anime and not use_on_air_profile and settings.SONARR_COMPLETE_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_COMPLETE_QUALITY_PROFILE_ID
-        if is_anime and settings.SONARR_ANIME_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_ANIME_QUALITY_PROFILE_ID
+        quality_profile_id = self.quality_profile_id
+        if not is_anime and use_on_air_profile and self.on_air_quality_profile_id is not None:
+            quality_profile_id = self.on_air_quality_profile_id
+        if not is_anime and not use_on_air_profile and self.complete_quality_profile_id is not None:
+            quality_profile_id = self.complete_quality_profile_id
+        if is_anime and self.anime_quality_profile_id is not None:
+            quality_profile_id = self.anime_quality_profile_id
 
-        language_profile_id = settings.SONARR_LANGUAGE_PROFILE_ID
-        if is_anime and settings.SONARR_ANIME_LANGUAGE_PROFILE_ID is not None:
-            language_profile_id = settings.SONARR_ANIME_LANGUAGE_PROFILE_ID
+        language_profile_id = self.language_profile_id
+        if is_anime and self.anime_language_profile_id is not None:
+            language_profile_id = self.anime_language_profile_id
 
-        root_folder_path = settings.SONARR_ROOT_FOLDER_PATH
-        if is_anime and settings.SONARR_ANIME_ROOT_FOLDER_PATH:
-            root_folder_path = settings.SONARR_ANIME_ROOT_FOLDER_PATH
+        root_folder_path = self.root_folder_path
+        if is_anime and self.anime_root_folder_path:
+            root_folder_path = self.anime_root_folder_path
 
-        series_type = settings.SONARR_SERIES_TYPE
-        if is_anime and settings.SONARR_USE_ANIME_SERIES_TYPE:
-            series_type = settings.SONARR_ANIME_SERIES_TYPE
+        series_type = self.series_type
+        if is_anime and self.use_anime_series_type:
+            series_type = self.anime_series_type
 
         return {
             "rootFolderPath": root_folder_path,

@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
     OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
     OWNED_MEDIA_SYNC_TIMEZONE: str = "Europe/Paris"
+    INTEGRATION_SETTINGS_ENCRYPTION_KEY: str = ""
 
     # Security and validation settings
     PASSWORD_MIN_LENGTH: int = 7

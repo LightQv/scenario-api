@@ -70,6 +70,7 @@ class SyncAlreadyRunningError(Exception):
 def sync_radarr_owned_movies(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """
     Sync Radarr-owned movies into the owned media table.
@@ -100,6 +101,7 @@ def sync_radarr_owned_movies(
             database_session,
             trigger=trigger,
             mark_running=True,
+            radarr_service=radarr_service,
         )
     finally:
         _radarr_movie_sync_lock.release()
@@ -138,6 +140,7 @@ def start_radarr_owned_movies_sync(
 def sync_radarr_owned_movies_with_reserved_lock(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Run a Radarr movie sync after ``start_radarr_owned_movies_sync``.
 
@@ -153,6 +156,7 @@ def sync_radarr_owned_movies_with_reserved_lock(
             database_session,
             trigger=trigger,
             mark_running=False,
+            radarr_service=radarr_service,
         )
     finally:
         _radarr_movie_sync_lock.release()
@@ -180,10 +184,16 @@ def start_sonarr_owned_tv_sync(
 def sync_sonarr_owned_tv_with_reserved_lock(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    sonarr_service: SonarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Run a Sonarr TV sync after ``start_sonarr_owned_tv_sync``."""
     try:
-        return _sync_sonarr_owned_tv(database_session, trigger=trigger, mark_running=False)
+        return _sync_sonarr_owned_tv(
+            database_session,
+            trigger=trigger,
+            mark_running=False,
+            sonarr_service=sonarr_service,
+        )
     finally:
         _sonarr_tv_sync_lock.release()
 
@@ -192,6 +202,7 @@ def _sync_radarr_owned_movies(
     database_session: Session,
     trigger: str,
     mark_running: bool,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Sync Radarr owned movies with hydrated TMDB metadata."""
     sync_label = f"{RADARR_SOURCE} {MOVIE_MEDIA_TYPE}"
@@ -203,7 +214,9 @@ def _sync_radarr_owned_movies(
             _mark_sync_running(database_session, RADARR_SOURCE, MOVIE_MEDIA_TYPE, trigger)
         log.info("Owned media sync started: {} trigger={}", sync_label, trigger)
         synced_at = datetime.utcnow()
-        tmdb_ids = RadarrService().get_owned_movie_tmdb_ids()
+        if radarr_service is None:
+            raise RuntimeError("Radarr integration service is required for owned media sync")
+        tmdb_ids = radarr_service.get_owned_movie_tmdb_ids()
         movie_metadata = _fetch_movie_metadata(tmdb_ids)
 
         (
@@ -310,6 +323,7 @@ def _sync_sonarr_owned_tv(
     database_session: Session,
     trigger: str,
     mark_running: bool,
+    sonarr_service: SonarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Sync Sonarr owned episodes into the owned media table."""
     sync_label = f"{SONARR_SOURCE} {TV_MEDIA_TYPE}"
@@ -320,7 +334,8 @@ def _sync_sonarr_owned_tv(
             _mark_sync_running(database_session, SONARR_SOURCE, TV_MEDIA_TYPE, trigger)
         log.info("Owned media sync started: {} trigger={}", sync_label, trigger)
         synced_at = datetime.utcnow()
-        sonarr_service = SonarrService()
+        if sonarr_service is None:
+            raise RuntimeError("Sonarr integration service is required for owned media sync")
         tmdb_service = TmdbService()
         owned_rows: list[OwnedMedia] = []
 

@@ -40,6 +40,12 @@ from app.services.owned_media_service import (
     sync_radarr_owned_movies_with_reserved_lock,
     sync_sonarr_owned_tv_with_reserved_lock,
 )
+from app.services.radarr_service import RadarrService
+from app.services.sonarr_service import SonarrService
+from app.services.user_integration_settings_service import (
+    get_enabled_radarr_config,
+    get_enabled_sonarr_config,
+)
 
 router = APIRouter(
     tags=["Owned media"],
@@ -60,7 +66,7 @@ router = APIRouter(
 )
 def sync_radarr_owned_media(
     background_tasks: BackgroundTasks,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """
@@ -70,8 +76,9 @@ def sync_radarr_owned_media(
     should use the sync status endpoint to observe completion or failure.
     """
     try:
+        get_enabled_radarr_config(database_session, user.id)
         sync_status = start_radarr_owned_movies_sync(database_session)
-        background_tasks.add_task(_run_radarr_owned_media_sync_background)
+        background_tasks.add_task(_run_radarr_owned_media_sync_background, user.id)
         return sync_status
     except SyncAlreadyRunningError as error:
         raise HTTPException(
@@ -80,11 +87,19 @@ def sync_radarr_owned_media(
         ) from error
 
 
-def _run_radarr_owned_media_sync_background() -> None:
+def _run_radarr_owned_media_sync_background(user_id) -> None:
     """Run queued Radarr owned movie sync with a fresh DB session."""
     database_session = SessionLocal()
     try:
-        sync_radarr_owned_movies_with_reserved_lock(database_session)
+        runtime_config = get_enabled_radarr_config(database_session, user_id)
+        radarr_service = RadarrService(
+            url=runtime_config.config.get("url"),
+            api_key=runtime_config.api_key,
+            root_folder_path=runtime_config.config.get("root_folder_path"),
+            quality_profile_id=runtime_config.config.get("quality_profile_id"),
+            minimum_availability=runtime_config.config.get("minimum_availability"),
+        )
+        sync_radarr_owned_movies_with_reserved_lock(database_session, radarr_service=radarr_service)
     finally:
         database_session.close()
 
@@ -98,13 +113,14 @@ def _run_radarr_owned_media_sync_background() -> None:
 )
 def sync_sonarr_owned_media(
     background_tasks: BackgroundTasks,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """Manually sync Scenario's owned TV episodes from Sonarr."""
     try:
+        get_enabled_sonarr_config(database_session, user.id)
         sync_status = start_sonarr_owned_tv_sync(database_session)
-        background_tasks.add_task(_run_sonarr_owned_media_sync_background)
+        background_tasks.add_task(_run_sonarr_owned_media_sync_background, user.id)
         return sync_status
     except SyncAlreadyRunningError as error:
         raise HTTPException(
@@ -113,11 +129,29 @@ def sync_sonarr_owned_media(
         ) from error
 
 
-def _run_sonarr_owned_media_sync_background() -> None:
+def _run_sonarr_owned_media_sync_background(user_id) -> None:
     """Run queued Sonarr owned TV sync with a fresh DB session."""
     database_session = SessionLocal()
     try:
-        sync_sonarr_owned_tv_with_reserved_lock(database_session)
+        runtime_config = get_enabled_sonarr_config(database_session, user_id)
+        sonarr_service = SonarrService(
+            url=runtime_config.config.get("url"),
+            api_key=runtime_config.api_key,
+            root_folder_path=runtime_config.config.get("root_folder_path"),
+            anime_root_folder_path=runtime_config.config.get("anime_root_folder_path"),
+            quality_profile_id=runtime_config.config.get("quality_profile_id"),
+            on_air_quality_profile_id=runtime_config.config.get("on_air_quality_profile_id"),
+            complete_quality_profile_id=runtime_config.config.get("complete_quality_profile_id"),
+            anime_quality_profile_id=runtime_config.config.get("anime_quality_profile_id"),
+            language_profile_id=runtime_config.config.get("language_profile_id"),
+            anime_language_profile_id=runtime_config.config.get("anime_language_profile_id"),
+            series_type=runtime_config.config.get("series_type"),
+            anime_series_type=runtime_config.config.get("anime_series_type"),
+            monitor_mode=runtime_config.config.get("monitor_mode"),
+            season_folder=runtime_config.config.get("season_folder"),
+            use_anime_series_type=runtime_config.config.get("use_anime_series_type"),
+        )
+        sync_sonarr_owned_tv_with_reserved_lock(database_session, sonarr_service=sonarr_service)
     finally:
         database_session.close()
 
