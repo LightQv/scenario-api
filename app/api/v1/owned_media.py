@@ -97,7 +97,6 @@ def _run_radarr_owned_media_sync_background(user_id) -> None:
             api_key=runtime_config.api_key,
             root_folder_path=runtime_config.config.get("root_folder_path"),
             quality_profile_id=runtime_config.config.get("quality_profile_id"),
-            minimum_availability=runtime_config.config.get("minimum_availability"),
         )
         sync_radarr_owned_movies_with_reserved_lock(database_session, radarr_service=radarr_service)
     finally:

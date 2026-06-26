@@ -32,7 +32,6 @@ RADARR_CONFIG_KEYS = {
     "url",
     "root_folder_path",
     "quality_profile_id",
-    "minimum_availability",
 }
 SONARR_CONFIG_KEYS = {
     "url",
@@ -217,11 +216,6 @@ def get_radarr_options(database_session: Session, user_id: UUID) -> RadarrOption
             for item in root_folders
             if isinstance(item, dict) and item.get("path")
         ],
-        minimum_availability=[
-            SelectOption(label="Announced", value="announced"),
-            SelectOption(label="In cinemas", value="inCinemas"),
-            SelectOption(label="Released", value="released"),
-        ],
     )
 
 
@@ -377,7 +371,6 @@ def _radarr_response(row: UserIntegrationSettings) -> RadarrSettingsResponse:
         webhook_secret_set=bool(secrets.get(SECRET_WEBHOOK_SECRET)),
         root_folder_path=config.get("root_folder_path"),
         quality_profile_id=config.get("quality_profile_id"),
-        minimum_availability=config.get("minimum_availability"),
     )
 
 
@@ -432,7 +425,6 @@ def _radarr_configured(row: UserIntegrationSettings) -> bool:
         config.get("url")
         and config.get("root_folder_path")
         and config.get("quality_profile_id") is not None
-        and config.get("minimum_availability")
         and secrets.get(SECRET_API_KEY)
     )
 

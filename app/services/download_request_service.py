@@ -913,7 +913,6 @@ def _radarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig
         api_key=runtime_config.api_key,
         root_folder_path=config.get("root_folder_path"),
         quality_profile_id=config.get("quality_profile_id"),
-        minimum_availability=config.get("minimum_availability"),
     )
 
 

@@ -14,6 +14,8 @@ from fastapi import HTTPException, status
 
 from app.core.settings import settings
 
+RADARR_MINIMUM_AVAILABILITY = "released"
+
 
 class RadarrService:
     """Client wrapper for Radarr movie library operations."""
@@ -24,15 +26,12 @@ class RadarrService:
         api_key: str | None = None,
         root_folder_path: str | None = None,
         quality_profile_id: int | None = None,
-        minimum_availability: str | None = None,
     ):
         self.url: str = (url or settings.RADARR_URL).rstrip("/")
         self.api_key: str = api_key or settings.RADARR_API_KEY
         self.root_folder_path: str = root_folder_path or settings.RADARR_ROOT_FOLDER_PATH
         self.quality_profile_id: int = quality_profile_id or settings.RADARR_QUALITY_PROFILE_ID
-        self.minimum_availability: str = (
-            minimum_availability or settings.RADARR_MINIMUM_AVAILABILITY
-        )
+        self.minimum_availability: str = RADARR_MINIMUM_AVAILABILITY
 
     def get_movies(self) -> list[dict[str, Any]]:
         """

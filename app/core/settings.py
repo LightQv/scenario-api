@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     RADARR_WEBHOOK_SECRET: str
     RADARR_ROOT_FOLDER_PATH: str
     RADARR_QUALITY_PROFILE_ID: int
-    RADARR_MINIMUM_AVAILABILITY: str = "released"
     SONARR_URL: str = ""
     SONARR_API_KEY: str = ""
     SONARR_WEBHOOK_SECRET: str = ""

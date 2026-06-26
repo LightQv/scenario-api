@@ -32,7 +32,6 @@ class RadarrSettingsResponse(BaseModel):
     webhook_secret_set: bool = False
     root_folder_path: str | None = None
     quality_profile_id: int | None = None
-    minimum_availability: str | None = None
 
 
 class RadarrSettingsPatch(BaseModel):
@@ -44,7 +43,6 @@ class RadarrSettingsPatch(BaseModel):
     webhook_secret: str | None = Field(default=None, min_length=1)
     root_folder_path: str | None = None
     quality_profile_id: int | None = None
-    minimum_availability: str | None = None
 
 
 class SonarrSettingsResponse(BaseModel):
@@ -113,7 +111,6 @@ class RadarrOptionsResponse(BaseModel):
 
     quality_profiles: list[SelectOption]
     root_folders: list[SelectOption]
-    minimum_availability: list[SelectOption]
 
 
 class SonarrOptionsResponse(BaseModel):
