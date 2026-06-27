@@ -71,15 +71,7 @@ class Settings(BaseSettings):
     SONARR_ANIME_QUALITY_PROFILE_ID: int | None = None
     SONARR_LANGUAGE_PROFILE_ID: int | None = None
     SONARR_ANIME_LANGUAGE_PROFILE_ID: int | None = None
-    SONARR_SERIES_TYPE: str = "standard"
-    SONARR_ANIME_SERIES_TYPE: str = "anime"
-    SONARR_MONITOR_MODE: str = "all"
     SONARR_ON_AIR_RECENCY_DAYS: int = 21
-    SONARR_SEASON_FOLDER: bool = True
-    SONARR_ANIME_TAG_LABEL: str = "anime"
-    SONARR_ON_AIR_TAG_LABEL: str = "tv-onair"
-    SONARR_COMPLETE_TAG_LABEL: str = "tv-complete"
-    SONARR_USE_ANIME_SERIES_TYPE: bool = True
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
     OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
     OWNED_MEDIA_SYNC_TIMEZONE: str = "Europe/Paris"

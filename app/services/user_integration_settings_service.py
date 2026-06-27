@@ -17,6 +17,8 @@ from app.schemas import (
     RadarrSettingsResponse,
     SelectOption,
     SonarrOptionsResponse,
+    SonarrProfileType,
+    SonarrProfileUpsert,
     SonarrSettingsPatch,
     SonarrSettingsResponse,
     TestConnectionResponse,
@@ -27,6 +29,7 @@ RADARR_SOURCE = "RADARR"
 SONARR_SOURCE = "SONARR"
 SECRET_API_KEY = "api_key"
 SECRET_WEBHOOK_SECRET = "webhook_secret"
+SONARR_PROFILE_TYPES = {"tv_on_air", "tv_complete", "anime"}
 
 RADARR_CONFIG_KEYS = {
     "url",
@@ -35,23 +38,7 @@ RADARR_CONFIG_KEYS = {
 }
 SONARR_CONFIG_KEYS = {
     "url",
-    "root_folder_path",
-    "anime_root_folder_path",
-    "quality_profile_id",
-    "on_air_quality_profile_id",
-    "complete_quality_profile_id",
-    "anime_quality_profile_id",
-    "language_profile_id",
-    "anime_language_profile_id",
-    "series_type",
-    "anime_series_type",
-    "monitor_mode",
-    "on_air_recency_days",
-    "season_folder",
-    "anime_tag_label",
-    "on_air_tag_label",
-    "complete_tag_label",
-    "use_anime_series_type",
+    "profiles",
 }
 
 
@@ -114,6 +101,41 @@ def update_sonarr_settings(
     """Patch Sonarr settings without contacting Sonarr."""
     row = _get_or_create_settings(database_session, user_id, SONARR_SOURCE)
     _apply_patch(row, payload.model_dump(exclude_unset=True), SONARR_CONFIG_KEYS)
+    database_session.commit()
+    database_session.refresh(row)
+    return _sonarr_response(row)
+
+
+def upsert_sonarr_profile(
+    database_session: Session,
+    user_id: UUID,
+    profile_type: SonarrProfileType,
+    payload: SonarrProfileUpsert,
+) -> SonarrSettingsResponse:
+    """Create or replace one grouped Sonarr Scenario profile."""
+    row = _get_or_create_settings(database_session, user_id, SONARR_SOURCE)
+    config = dict(row.config or {})
+    profiles = _normalized_sonarr_profiles(config)
+    profiles[profile_type] = payload.model_dump()
+    config["profiles"] = profiles
+    row.config = config
+    database_session.commit()
+    database_session.refresh(row)
+    return _sonarr_response(row)
+
+
+def delete_sonarr_profile(
+    database_session: Session,
+    user_id: UUID,
+    profile_type: SonarrProfileType,
+) -> SonarrSettingsResponse:
+    """Remove one grouped Sonarr Scenario profile."""
+    row = _get_or_create_settings(database_session, user_id, SONARR_SOURCE)
+    config = dict(row.config or {})
+    profiles = _normalized_sonarr_profiles(config)
+    profiles.pop(profile_type, None)
+    config["profiles"] = profiles
+    row.config = config
     database_session.commit()
     database_session.refresh(row)
     return _sonarr_response(row)
@@ -226,7 +248,6 @@ def get_sonarr_options(database_session: Session, user_id: UUID) -> SonarrOption
     quality_profiles = _arr_request(url, runtime_config.api_key, "/qualityprofile")
     language_profiles = _safe_arr_request(url, runtime_config.api_key, "/languageprofile")
     root_folders = _arr_request(url, runtime_config.api_key, "/rootfolder")
-    tags = _arr_request(url, runtime_config.api_key, "/tag")
     return SonarrOptionsResponse(
         quality_profiles=[
             SelectOption(label=str(item.get("name") or item.get("id")), value=int(item["id"]))
@@ -242,25 +263,6 @@ def get_sonarr_options(database_session: Session, user_id: UUID) -> SonarrOption
             SelectOption(label=str(item.get("path") or ""), value=str(item.get("path") or ""))
             for item in root_folders
             if isinstance(item, dict) and item.get("path")
-        ],
-        tags=[
-            SelectOption(label=str(item.get("label") or ""), value=str(item.get("label") or ""))
-            for item in tags
-            if isinstance(item, dict) and item.get("label")
-        ],
-        series_types=[
-            SelectOption(label="Standard", value="standard"),
-            SelectOption(label="Daily", value="daily"),
-            SelectOption(label="Anime", value="anime"),
-        ],
-        monitor_modes=[
-            SelectOption(label="All episodes", value="all"),
-            SelectOption(label="Future episodes", value="future"),
-            SelectOption(label="Missing episodes", value="missing"),
-            SelectOption(label="Existing episodes", value="existing"),
-            SelectOption(label="First season", value="firstSeason"),
-            SelectOption(label="Latest season", value="latestSeason"),
-            SelectOption(label="None", value="none"),
         ],
     )
 
@@ -384,23 +386,7 @@ def _sonarr_response(row: UserIntegrationSettings) -> SonarrSettingsResponse:
         url=config.get("url"),
         api_key_set=bool(secrets.get(SECRET_API_KEY)),
         webhook_secret_set=bool(secrets.get(SECRET_WEBHOOK_SECRET)),
-        root_folder_path=config.get("root_folder_path"),
-        anime_root_folder_path=config.get("anime_root_folder_path"),
-        quality_profile_id=config.get("quality_profile_id"),
-        on_air_quality_profile_id=config.get("on_air_quality_profile_id"),
-        complete_quality_profile_id=config.get("complete_quality_profile_id"),
-        anime_quality_profile_id=config.get("anime_quality_profile_id"),
-        language_profile_id=config.get("language_profile_id"),
-        anime_language_profile_id=config.get("anime_language_profile_id"),
-        series_type=config.get("series_type"),
-        anime_series_type=config.get("anime_series_type"),
-        monitor_mode=config.get("monitor_mode"),
-        on_air_recency_days=config.get("on_air_recency_days"),
-        season_folder=config.get("season_folder"),
-        anime_tag_label=config.get("anime_tag_label"),
-        on_air_tag_label=config.get("on_air_tag_label"),
-        complete_tag_label=config.get("complete_tag_label"),
-        use_anime_series_type=config.get("use_anime_series_type"),
+        profiles=_normalized_sonarr_profiles(config),
     )
 
 
@@ -440,12 +426,66 @@ def _sonarr_configured(row: UserIntegrationSettings) -> bool:
     """Return whether Sonarr has the minimum required config."""
     config = row.config or {}
     secrets = row.encrypted_secrets or {}
+    profiles = _normalized_sonarr_profiles(config)
     return bool(
         config.get("url")
-        and config.get("root_folder_path")
-        and config.get("quality_profile_id") is not None
+        and all(profile_type in profiles for profile_type in SONARR_PROFILE_TYPES)
         and secrets.get(SECRET_API_KEY)
     )
+
+
+def _normalized_sonarr_profiles(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return grouped Sonarr profiles, including legacy flat-config migration."""
+    raw_profiles = config.get("profiles")
+    if isinstance(raw_profiles, dict):
+        profiles: dict[str, dict[str, Any]] = {}
+        for profile_type, profile in raw_profiles.items():
+            if profile_type not in SONARR_PROFILE_TYPES or not isinstance(profile, dict):
+                continue
+            root_folder_path = profile.get("root_folder_path")
+            quality_profile_id = profile.get("quality_profile_id")
+            if not root_folder_path or quality_profile_id is None:
+                continue
+            profiles[profile_type] = {
+                "root_folder_path": str(root_folder_path),
+                "quality_profile_id": int(quality_profile_id),
+                "language_profile_id": profile.get("language_profile_id"),
+            }
+        if profiles:
+            return profiles
+
+    profiles = {}
+    root_folder_path = config.get("root_folder_path")
+    anime_root_folder_path = config.get("anime_root_folder_path")
+    language_profile_id = config.get("language_profile_id")
+    anime_language_profile_id = config.get("anime_language_profile_id")
+    quality_profile_id = config.get("quality_profile_id")
+
+    on_air_quality_profile_id = config.get("on_air_quality_profile_id") or quality_profile_id
+    if root_folder_path and on_air_quality_profile_id is not None:
+        profiles["tv_on_air"] = {
+            "root_folder_path": str(root_folder_path),
+            "quality_profile_id": int(on_air_quality_profile_id),
+            "language_profile_id": language_profile_id,
+        }
+
+    complete_quality_profile_id = config.get("complete_quality_profile_id") or quality_profile_id
+    if root_folder_path and complete_quality_profile_id is not None:
+        profiles["tv_complete"] = {
+            "root_folder_path": str(root_folder_path),
+            "quality_profile_id": int(complete_quality_profile_id),
+            "language_profile_id": language_profile_id,
+        }
+
+    anime_quality_profile_id = config.get("anime_quality_profile_id") or quality_profile_id
+    if anime_root_folder_path and anime_quality_profile_id is not None:
+        profiles["anime"] = {
+            "root_folder_path": str(anime_root_folder_path),
+            "quality_profile_id": int(anime_quality_profile_id),
+            "language_profile_id": anime_language_profile_id,
+        }
+
+    return profiles
 
 
 def _runtime_config(row: UserIntegrationSettings) -> IntegrationRuntimeConfig:
@@ -458,9 +498,12 @@ def _runtime_config(row: UserIntegrationSettings) -> IntegrationRuntimeConfig:
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{row.source} API key is not configured",
         )
+    config = dict(row.config or {})
+    if row.source == SONARR_SOURCE:
+        config["profiles"] = _normalized_sonarr_profiles(config)
     return IntegrationRuntimeConfig(
         source=str(row.source),
-        config=dict(row.config or {}),
+        config=config,
         api_key=api_key,
         webhook_secret=cipher.decrypt(secrets.get(SECRET_WEBHOOK_SECRET)),
     )

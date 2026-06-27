@@ -11,6 +11,8 @@ from app.schemas import (
     RadarrSettingsPatch,
     RadarrSettingsResponse,
     SonarrOptionsResponse,
+    SonarrProfileType,
+    SonarrProfileUpsert,
     SonarrSettingsPatch,
     SonarrSettingsResponse,
     TestConnectionResponse,
@@ -21,10 +23,12 @@ from app.services.user_integration_settings_service import (
     get_radarr_settings,
     get_sonarr_options,
     get_sonarr_settings,
+    delete_sonarr_profile,
     test_radarr_connection,
     test_sonarr_connection,
     update_radarr_settings,
     update_sonarr_settings,
+    upsert_sonarr_profile,
 )
 
 router = APIRouter(
@@ -136,6 +140,37 @@ def patch_sonarr_settings(
 ) -> SonarrSettingsResponse:
     """Patch Sonarr settings without contacting Sonarr."""
     return update_sonarr_settings(database_session, user.id, payload)
+
+
+@router.put(
+    "/downloads/sonarr/profiles/{profile_type}",
+    response_model=SonarrSettingsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Create or replace a Sonarr Scenario profile",
+)
+def put_sonarr_profile(
+    profile_type: SonarrProfileType,
+    payload: SonarrProfileUpsert,
+    user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> SonarrSettingsResponse:
+    """Create or replace one grouped Sonarr profile for the current user."""
+    return upsert_sonarr_profile(database_session, user.id, profile_type, payload)
+
+
+@router.delete(
+    "/downloads/sonarr/profiles/{profile_type}",
+    response_model=SonarrSettingsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete a Sonarr Scenario profile",
+)
+def remove_sonarr_profile(
+    profile_type: SonarrProfileType,
+    user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> SonarrSettingsResponse:
+    """Delete one grouped Sonarr profile for the current user."""
+    return delete_sonarr_profile(database_session, user.id, profile_type)
 
 
 @router.post(

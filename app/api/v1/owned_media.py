@@ -133,22 +133,21 @@ def _run_sonarr_owned_media_sync_background(user_id) -> None:
     database_session = SessionLocal()
     try:
         runtime_config = get_enabled_sonarr_config(database_session, user_id)
+        profiles = runtime_config.config.get("profiles") if isinstance(runtime_config.config.get("profiles"), dict) else {}
+        tv_on_air_profile = profiles.get("tv_on_air") or {}
+        tv_complete_profile = profiles.get("tv_complete") or {}
+        anime_profile = profiles.get("anime") or {}
         sonarr_service = SonarrService(
             url=runtime_config.config.get("url"),
             api_key=runtime_config.api_key,
-            root_folder_path=runtime_config.config.get("root_folder_path"),
-            anime_root_folder_path=runtime_config.config.get("anime_root_folder_path"),
-            quality_profile_id=runtime_config.config.get("quality_profile_id"),
-            on_air_quality_profile_id=runtime_config.config.get("on_air_quality_profile_id"),
-            complete_quality_profile_id=runtime_config.config.get("complete_quality_profile_id"),
-            anime_quality_profile_id=runtime_config.config.get("anime_quality_profile_id"),
-            language_profile_id=runtime_config.config.get("language_profile_id"),
-            anime_language_profile_id=runtime_config.config.get("anime_language_profile_id"),
-            series_type=runtime_config.config.get("series_type"),
-            anime_series_type=runtime_config.config.get("anime_series_type"),
-            monitor_mode=runtime_config.config.get("monitor_mode"),
-            season_folder=runtime_config.config.get("season_folder"),
-            use_anime_series_type=runtime_config.config.get("use_anime_series_type"),
+            root_folder_path=tv_on_air_profile.get("root_folder_path") or tv_complete_profile.get("root_folder_path"),
+            anime_root_folder_path=anime_profile.get("root_folder_path"),
+            quality_profile_id=tv_on_air_profile.get("quality_profile_id") or tv_complete_profile.get("quality_profile_id"),
+            on_air_quality_profile_id=tv_on_air_profile.get("quality_profile_id"),
+            complete_quality_profile_id=tv_complete_profile.get("quality_profile_id"),
+            anime_quality_profile_id=anime_profile.get("quality_profile_id"),
+            language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
+            anime_language_profile_id=anime_profile.get("language_profile_id"),
         )
         sync_sonarr_owned_tv_with_reserved_lock(database_session, sonarr_service=sonarr_service)
     finally:

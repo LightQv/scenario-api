@@ -22,7 +22,8 @@ from app.schemas.download_request import (
 from app.schemas.user_settings import (
     DownloadSettingsOverview, IntegrationSummary, RadarrOptionsResponse,
     RadarrSettingsPatch, RadarrSettingsResponse, SelectOption,
-    SonarrOptionsResponse, SonarrSettingsPatch, SonarrSettingsResponse,
+    SonarrOptionsResponse, SonarrProfileConfig, SonarrProfileType,
+    SonarrProfileUpsert, SonarrSettingsPatch, SonarrSettingsResponse,
     TestConnectionResponse,
 )
 
@@ -42,6 +43,7 @@ __all__ = [
     "SonarrSeriesDownloadCreate",
     "DownloadSettingsOverview", "IntegrationSummary", "RadarrOptionsResponse",
     "RadarrSettingsPatch", "RadarrSettingsResponse", "SelectOption",
-    "SonarrOptionsResponse", "SonarrSettingsPatch", "SonarrSettingsResponse",
+    "SonarrOptionsResponse", "SonarrProfileConfig", "SonarrProfileType",
+    "SonarrProfileUpsert", "SonarrSettingsPatch", "SonarrSettingsResponse",
     "TestConnectionResponse",
 ]

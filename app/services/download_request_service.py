@@ -29,6 +29,11 @@ SCOPE_SERIES = "series"
 SCOPE_SEASON = "season"
 ANIMATION_GENRE_ID = 16
 ANIME_TAG_LABEL = "anime"
+TV_ON_AIR_TAG_LABEL = "tv-onair"
+TV_COMPLETE_TAG_LABEL = "tv-complete"
+SONARR_PROFILE_TV_ON_AIR = "tv_on_air"
+SONARR_PROFILE_TV_COMPLETE = "tv_complete"
+SONARR_PROFILE_ANIME = "anime"
 
 DOWNLOAD_STATUS_REQUESTED = "requested"
 DOWNLOAD_STATUS_SENT_TO_RADARR = "sent_to_radarr"
@@ -739,7 +744,6 @@ def process_sonarr_download_request(request_id: UUID) -> None:
             download_request.tmdb_id,
             scope,
             season_number,
-            runtime_config.config.get("on_air_recency_days"),
         )
         sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
         sonarr_series = sonarr_service.add_series_and_search(
@@ -919,22 +923,21 @@ def _radarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig
 def _sonarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig) -> SonarrService:
     """Build a Sonarr service from decrypted per-user settings."""
     config = runtime_config.config
+    profiles = config.get("profiles") if isinstance(config.get("profiles"), dict) else {}
+    tv_on_air_profile = profiles.get(SONARR_PROFILE_TV_ON_AIR) or {}
+    tv_complete_profile = profiles.get(SONARR_PROFILE_TV_COMPLETE) or {}
+    anime_profile = profiles.get(SONARR_PROFILE_ANIME) or {}
     return SonarrService(
         url=config.get("url"),
         api_key=runtime_config.api_key,
-        root_folder_path=config.get("root_folder_path"),
-        anime_root_folder_path=config.get("anime_root_folder_path"),
-        quality_profile_id=config.get("quality_profile_id"),
-        on_air_quality_profile_id=config.get("on_air_quality_profile_id"),
-        complete_quality_profile_id=config.get("complete_quality_profile_id"),
-        anime_quality_profile_id=config.get("anime_quality_profile_id"),
-        language_profile_id=config.get("language_profile_id"),
-        anime_language_profile_id=config.get("anime_language_profile_id"),
-        series_type=config.get("series_type"),
-        anime_series_type=config.get("anime_series_type"),
-        monitor_mode=config.get("monitor_mode"),
-        season_folder=config.get("season_folder"),
-        use_anime_series_type=config.get("use_anime_series_type"),
+        root_folder_path=tv_on_air_profile.get("root_folder_path") or tv_complete_profile.get("root_folder_path"),
+        anime_root_folder_path=anime_profile.get("root_folder_path"),
+        quality_profile_id=tv_on_air_profile.get("quality_profile_id") or tv_complete_profile.get("quality_profile_id"),
+        on_air_quality_profile_id=tv_on_air_profile.get("quality_profile_id"),
+        complete_quality_profile_id=tv_complete_profile.get("quality_profile_id"),
+        anime_quality_profile_id=anime_profile.get("quality_profile_id"),
+        language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
+        anime_language_profile_id=anime_profile.get("language_profile_id"),
     )
 
 
@@ -947,13 +950,13 @@ def _get_sonarr_tag_labels(
     tag_labels: list[str] = []
 
     if _is_anime_tv(metadata):
-        _append_tag_label(tag_labels, config.get("anime_tag_label"))
+        _append_tag_label(tag_labels, ANIME_TAG_LABEL)
         return tag_labels
 
     if use_on_air_profile:
-        _append_tag_label(tag_labels, config.get("on_air_tag_label"))
+        _append_tag_label(tag_labels, TV_ON_AIR_TAG_LABEL)
     else:
-        _append_tag_label(tag_labels, config.get("complete_tag_label"))
+        _append_tag_label(tag_labels, TV_COMPLETE_TAG_LABEL)
 
     return tag_labels
 
@@ -986,7 +989,6 @@ def _sonarr_request_uses_on_air_profile(
     tmdb_id: int,
     scope: str,
     season_number: int | None,
-    on_air_recency_days: int | None = None,
 ) -> bool:
     """Return whether a Sonarr request should use the on-air TV profile."""
     try:
@@ -994,14 +996,14 @@ def _sonarr_request_uses_on_air_profile(
         if scope == SCOPE_SEASON:
             if season_number is None:
                 return True
-            return _tmdb_season_is_current(tmdb_service, tmdb_id, season_number, on_air_recency_days)
+            return _tmdb_season_is_current(tmdb_service, tmdb_id, season_number)
 
         tv_details = tmdb_service.get_tv_details(tmdb_id)
         for season in tv_details.get("seasons", []) or []:
             current_season_number = _safe_int(season.get("season_number"))
             if current_season_number is None or current_season_number <= 0:
                 continue
-            if _tmdb_season_is_current(tmdb_service, tmdb_id, current_season_number, on_air_recency_days):
+            if _tmdb_season_is_current(tmdb_service, tmdb_id, current_season_number):
                 return True
     except Exception:
         return True
@@ -1012,12 +1014,11 @@ def _tmdb_season_is_current(
     tmdb_service: TmdbService,
     tmdb_id: int,
     season_number: int,
-    on_air_recency_days: int | None = None,
 ) -> bool:
     """Return whether a TMDB season has unaired or recently aired episodes."""
     season_details = tmdb_service.get_tv_season_details(tmdb_id, season_number)
     today = datetime.utcnow().date()
-    recent_cutoff = today - timedelta(days=on_air_recency_days or settings.SONARR_ON_AIR_RECENCY_DAYS)
+    recent_cutoff = today - timedelta(days=settings.SONARR_ON_AIR_RECENCY_DAYS)
     latest_aired_at = None
 
     for episode in season_details.get("episodes", []) or []:

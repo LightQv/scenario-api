@@ -1,6 +1,6 @@
 """Schemas for per-user integration settings."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,23 +53,7 @@ class SonarrSettingsResponse(BaseModel):
     url: str | None = None
     api_key_set: bool = False
     webhook_secret_set: bool = False
-    root_folder_path: str | None = None
-    anime_root_folder_path: str | None = None
-    quality_profile_id: int | None = None
-    on_air_quality_profile_id: int | None = None
-    complete_quality_profile_id: int | None = None
-    anime_quality_profile_id: int | None = None
-    language_profile_id: int | None = None
-    anime_language_profile_id: int | None = None
-    series_type: str | None = None
-    anime_series_type: str | None = None
-    monitor_mode: str | None = None
-    on_air_recency_days: int | None = None
-    season_folder: bool | None = None
-    anime_tag_label: str | None = None
-    on_air_tag_label: str | None = None
-    complete_tag_label: str | None = None
-    use_anime_series_type: bool | None = None
+    profiles: dict[str, "SonarrProfileConfig"] = Field(default_factory=dict)
 
 
 class SonarrSettingsPatch(BaseModel):
@@ -79,23 +63,26 @@ class SonarrSettingsPatch(BaseModel):
     url: str | None = None
     api_key: str | None = Field(default=None, min_length=1)
     webhook_secret: str | None = Field(default=None, min_length=1)
-    root_folder_path: str | None = None
-    anime_root_folder_path: str | None = None
-    quality_profile_id: int | None = None
-    on_air_quality_profile_id: int | None = None
-    complete_quality_profile_id: int | None = None
-    anime_quality_profile_id: int | None = None
+    profiles: dict[str, "SonarrProfileConfig"] | None = None
+
+
+SonarrProfileType = Literal["tv_on_air", "tv_complete", "anime"]
+
+
+class SonarrProfileConfig(BaseModel):
+    """One Scenario Sonarr profile configuration."""
+
+    root_folder_path: str
+    quality_profile_id: int
     language_profile_id: int | None = None
-    anime_language_profile_id: int | None = None
-    series_type: str | None = None
-    anime_series_type: str | None = None
-    monitor_mode: str | None = None
-    on_air_recency_days: int | None = None
-    season_folder: bool | None = None
-    anime_tag_label: str | None = None
-    on_air_tag_label: str | None = None
-    complete_tag_label: str | None = None
-    use_anime_series_type: bool | None = None
+
+
+class SonarrProfileUpsert(BaseModel):
+    """Create or replace one Scenario Sonarr profile configuration."""
+
+    root_folder_path: str
+    quality_profile_id: int
+    language_profile_id: int | None = None
 
 
 class SelectOption(BaseModel):
@@ -119,9 +106,6 @@ class SonarrOptionsResponse(BaseModel):
     quality_profiles: list[SelectOption]
     language_profiles: list[SelectOption]
     root_folders: list[SelectOption]
-    tags: list[SelectOption]
-    series_types: list[SelectOption]
-    monitor_modes: list[SelectOption]
 
 
 class TestConnectionResponse(BaseModel):

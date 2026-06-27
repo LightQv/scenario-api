@@ -8,6 +8,12 @@ from fastapi import HTTPException, status
 
 from app.core.settings import settings
 
+SONARR_SERIES_TYPE = "standard"
+SONARR_ANIME_SERIES_TYPE = "anime"
+SONARR_MONITOR_MODE = "all"
+SONARR_SEASON_FOLDER = True
+SONARR_USE_ANIME_SERIES_TYPE = True
+
 
 class SonarrService:
     """Client wrapper for Sonarr TV library operations."""
@@ -40,12 +46,12 @@ class SonarrService:
         self.anime_quality_profile_id: int | None = anime_quality_profile_id or settings.SONARR_ANIME_QUALITY_PROFILE_ID
         self.language_profile_id: int | None = language_profile_id or settings.SONARR_LANGUAGE_PROFILE_ID
         self.anime_language_profile_id: int | None = anime_language_profile_id or settings.SONARR_ANIME_LANGUAGE_PROFILE_ID
-        self.series_type: str = series_type or settings.SONARR_SERIES_TYPE
-        self.anime_series_type: str = anime_series_type or settings.SONARR_ANIME_SERIES_TYPE
-        self.monitor_mode: str = monitor_mode or settings.SONARR_MONITOR_MODE
-        self.season_folder: bool = settings.SONARR_SEASON_FOLDER if season_folder is None else season_folder
+        self.series_type: str = series_type or SONARR_SERIES_TYPE
+        self.anime_series_type: str = anime_series_type or SONARR_ANIME_SERIES_TYPE
+        self.monitor_mode: str = monitor_mode or SONARR_MONITOR_MODE
+        self.season_folder: bool = SONARR_SEASON_FOLDER if season_folder is None else season_folder
         self.use_anime_series_type: bool = (
-            settings.SONARR_USE_ANIME_SERIES_TYPE
+            SONARR_USE_ANIME_SERIES_TYPE
             if use_anime_series_type is None
             else use_anime_series_type
         )
