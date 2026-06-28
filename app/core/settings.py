@@ -63,14 +63,6 @@ class Settings(BaseSettings):
     SONARR_URL: str = ""
     SONARR_API_KEY: str = ""
     SONARR_WEBHOOK_SECRET: str = ""
-    SONARR_ROOT_FOLDER_PATH: str = ""
-    SONARR_ANIME_ROOT_FOLDER_PATH: str = ""
-    SONARR_QUALITY_PROFILE_ID: int = 1
-    SONARR_ON_AIR_QUALITY_PROFILE_ID: int | None = None
-    SONARR_COMPLETE_QUALITY_PROFILE_ID: int | None = None
-    SONARR_ANIME_QUALITY_PROFILE_ID: int | None = None
-    SONARR_LANGUAGE_PROFILE_ID: int | None = None
-    SONARR_ANIME_LANGUAGE_PROFILE_ID: int | None = None
     SONARR_ON_AIR_RECENCY_DAYS: int = 21
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
     OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]

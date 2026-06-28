@@ -435,56 +435,24 @@ def _sonarr_configured(row: UserIntegrationSettings) -> bool:
 
 
 def _normalized_sonarr_profiles(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return grouped Sonarr profiles, including legacy flat-config migration."""
+    """Return valid grouped Sonarr profiles."""
     raw_profiles = config.get("profiles")
-    if isinstance(raw_profiles, dict):
-        profiles: dict[str, dict[str, Any]] = {}
-        for profile_type, profile in raw_profiles.items():
-            if profile_type not in SONARR_PROFILE_TYPES or not isinstance(profile, dict):
-                continue
-            root_folder_path = profile.get("root_folder_path")
-            quality_profile_id = profile.get("quality_profile_id")
-            if not root_folder_path or quality_profile_id is None:
-                continue
-            profiles[profile_type] = {
-                "root_folder_path": str(root_folder_path),
-                "quality_profile_id": int(quality_profile_id),
-                "language_profile_id": profile.get("language_profile_id"),
-            }
-        if profiles:
-            return profiles
+    if not isinstance(raw_profiles, dict):
+        return {}
 
-    profiles = {}
-    root_folder_path = config.get("root_folder_path")
-    anime_root_folder_path = config.get("anime_root_folder_path")
-    language_profile_id = config.get("language_profile_id")
-    anime_language_profile_id = config.get("anime_language_profile_id")
-    quality_profile_id = config.get("quality_profile_id")
-
-    on_air_quality_profile_id = config.get("on_air_quality_profile_id") or quality_profile_id
-    if root_folder_path and on_air_quality_profile_id is not None:
-        profiles["tv_on_air"] = {
+    profiles: dict[str, dict[str, Any]] = {}
+    for profile_type, profile in raw_profiles.items():
+        if profile_type not in SONARR_PROFILE_TYPES or not isinstance(profile, dict):
+            continue
+        root_folder_path = profile.get("root_folder_path")
+        quality_profile_id = profile.get("quality_profile_id")
+        if not root_folder_path or quality_profile_id is None:
+            continue
+        profiles[profile_type] = {
             "root_folder_path": str(root_folder_path),
-            "quality_profile_id": int(on_air_quality_profile_id),
-            "language_profile_id": language_profile_id,
+            "quality_profile_id": int(quality_profile_id),
+            "language_profile_id": profile.get("language_profile_id"),
         }
-
-    complete_quality_profile_id = config.get("complete_quality_profile_id") or quality_profile_id
-    if root_folder_path and complete_quality_profile_id is not None:
-        profiles["tv_complete"] = {
-            "root_folder_path": str(root_folder_path),
-            "quality_profile_id": int(complete_quality_profile_id),
-            "language_profile_id": language_profile_id,
-        }
-
-    anime_quality_profile_id = config.get("anime_quality_profile_id") or quality_profile_id
-    if anime_root_folder_path and anime_quality_profile_id is not None:
-        profiles["anime"] = {
-            "root_folder_path": str(anime_root_folder_path),
-            "quality_profile_id": int(anime_quality_profile_id),
-            "language_profile_id": anime_language_profile_id,
-        }
-
     return profiles
 
 

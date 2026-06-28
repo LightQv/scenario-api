@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.logger import log
 from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.models import DownloadRequest, OwnedMedia, User
@@ -460,6 +461,13 @@ def mark_sonarr_request_grabbed(
     updated_count = 0
     for download_request in download_requests:
         if download_request.scope == SCOPE_SEASON and season_number != download_request.season_number:
+            log.info(
+                "Sonarr grab ignored for request season: request_id={} requested_season={} grabbed_season={} title={}",
+                download_request.id,
+                download_request.season_number,
+                season_number,
+                _extract_grab_title(payload_data),
+            )
             continue
         download_request.status = DOWNLOAD_STATUS_DOWNLOADING
         download_request.error_message = None
@@ -745,6 +753,19 @@ def process_sonarr_download_request(request_id: UUID) -> None:
             scope,
             season_number,
         )
+        profile_type = _get_sonarr_profile_type(metadata, use_on_air_profile)
+        tag_labels = _get_sonarr_tag_labels(metadata, use_on_air_profile, runtime_config.config)
+        log.info(
+            "Sonarr request routing: request_id={} tmdb_id={} tvdb_id={} scope={} requested_season={} profile_type={} tag_labels={} recency_days={}",
+            download_request.id,
+            download_request.tmdb_id,
+            tvdb_id,
+            scope,
+            season_number,
+            profile_type,
+            tag_labels,
+            settings.SONARR_ON_AIR_RECENCY_DAYS,
+        )
         sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
         sonarr_series = sonarr_service.add_series_and_search(
             tvdb_id=tvdb_id,
@@ -752,7 +773,7 @@ def process_sonarr_download_request(request_id: UUID) -> None:
             season_number=season_number,
             is_anime=is_anime,
             use_on_air_profile=use_on_air_profile,
-            tag_labels=_get_sonarr_tag_labels(metadata, use_on_air_profile, runtime_config.config),
+            tag_labels=tag_labels,
         )
         download_request.tvdb_id = tvdb_id
         download_request.sonarr_series_id = _extract_sonarr_series_id(sonarr_series)
@@ -959,6 +980,18 @@ def _get_sonarr_tag_labels(
         _append_tag_label(tag_labels, TV_COMPLETE_TAG_LABEL)
 
     return tag_labels
+
+
+def _get_sonarr_profile_type(
+    metadata: TmdbTvMetadata,
+    use_on_air_profile: bool,
+) -> str:
+    """Return the Scenario Sonarr profile type selected for a request."""
+    if _is_anime_tv(metadata):
+        return SONARR_PROFILE_ANIME
+    if use_on_air_profile:
+        return SONARR_PROFILE_TV_ON_AIR
+    return SONARR_PROFILE_TV_COMPLETE
 
 
 def _append_tag_label(tag_labels: list[str], label: str | None) -> None:
@@ -1256,10 +1289,15 @@ def _find_sonarr_queue_records_for_request(
         if _sonarr_record_title_matches_request(download_request, queue_record):
             records.append(queue_record)
             continue
-        if download_request.scope == SCOPE_SEASON and download_request.season_number not in _sonarr_record_season_numbers(
-            queue_record,
-            episode_map,
-        ):
+        record_season_numbers = _sonarr_record_season_numbers(queue_record, episode_map)
+        if download_request.scope == SCOPE_SEASON and download_request.season_number not in record_season_numbers:
+            log.info(
+                "Sonarr queue record rejected for request season: request_id={} requested_season={} record_seasons={} title={}",
+                download_request.id,
+                download_request.season_number,
+                sorted(record_season_numbers),
+                _sonarr_record_title(queue_record),
+            )
             continue
         records.append(queue_record)
     return records
@@ -1285,6 +1323,12 @@ def _sonarr_record_title_matches_request(
         (record.get("data") or {}).get("sourceTitle"),
     ]
     return any(_normalize_release_title(title) == request_title for title in candidate_titles)
+
+
+def _sonarr_record_title(record: dict) -> object:
+    """Return the best available Sonarr queue/history title for logging."""
+    data = record.get("data") or {}
+    return record.get("title") or record.get("sourceTitle") or data.get("sourceTitle")
 
 
 def _normalize_release_title(value: object) -> str:
@@ -1352,10 +1396,15 @@ def _find_sonarr_history_record_for_request(
         tvdb_id = _safe_int(series.get("tvdbId"))
         if not _sonarr_series_matches(download_request, series_id, tvdb_id):
             continue
-        if download_request.scope == SCOPE_SEASON and download_request.season_number not in _sonarr_record_season_numbers(
-            history_record,
-            episode_map,
-        ):
+        record_season_numbers = _sonarr_record_season_numbers(history_record, episode_map)
+        if download_request.scope == SCOPE_SEASON and download_request.season_number not in record_season_numbers:
+            log.info(
+                "Sonarr history record rejected for request season: request_id={} requested_season={} record_seasons={} title={}",
+                download_request.id,
+                download_request.season_number,
+                sorted(record_season_numbers),
+                _sonarr_record_title(history_record),
+            )
             continue
         return history_record
     return None
