@@ -33,6 +33,8 @@ click==8.2.1
     #   uvicorn
 coverage[toml]==7.10.5
     # via pytest-cov
+cryptography==45.0.7
+    # via -r requirements.in
 dill==0.4.0
     # via pylint
 dnspython==2.7.0

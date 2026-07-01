@@ -16,6 +16,7 @@ from sqlalchemy import and_, or_
 from app.core.logger import log
 from app.models import IntegrationSyncStatus, OwnedMedia
 from app.schemas import (
+    OwnedMediaDeleteResponse,
     OwnedMediaResponse,
     OwnedMediaStatusResponse,
     OwnedMediaSyncResponse,
@@ -70,6 +71,7 @@ class SyncAlreadyRunningError(Exception):
 def sync_radarr_owned_movies(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """
     Sync Radarr-owned movies into the owned media table.
@@ -100,6 +102,7 @@ def sync_radarr_owned_movies(
             database_session,
             trigger=trigger,
             mark_running=True,
+            radarr_service=radarr_service,
         )
     finally:
         _radarr_movie_sync_lock.release()
@@ -138,6 +141,7 @@ def start_radarr_owned_movies_sync(
 def sync_radarr_owned_movies_with_reserved_lock(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Run a Radarr movie sync after ``start_radarr_owned_movies_sync``.
 
@@ -153,6 +157,7 @@ def sync_radarr_owned_movies_with_reserved_lock(
             database_session,
             trigger=trigger,
             mark_running=False,
+            radarr_service=radarr_service,
         )
     finally:
         _radarr_movie_sync_lock.release()
@@ -180,10 +185,16 @@ def start_sonarr_owned_tv_sync(
 def sync_sonarr_owned_tv_with_reserved_lock(
     database_session: Session,
     trigger: str = SYNC_TRIGGER_MANUAL,
+    sonarr_service: SonarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Run a Sonarr TV sync after ``start_sonarr_owned_tv_sync``."""
     try:
-        return _sync_sonarr_owned_tv(database_session, trigger=trigger, mark_running=False)
+        return _sync_sonarr_owned_tv(
+            database_session,
+            trigger=trigger,
+            mark_running=False,
+            sonarr_service=sonarr_service,
+        )
     finally:
         _sonarr_tv_sync_lock.release()
 
@@ -192,6 +203,7 @@ def _sync_radarr_owned_movies(
     database_session: Session,
     trigger: str,
     mark_running: bool,
+    radarr_service: RadarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Sync Radarr owned movies with hydrated TMDB metadata."""
     sync_label = f"{RADARR_SOURCE} {MOVIE_MEDIA_TYPE}"
@@ -203,7 +215,9 @@ def _sync_radarr_owned_movies(
             _mark_sync_running(database_session, RADARR_SOURCE, MOVIE_MEDIA_TYPE, trigger)
         log.info("Owned media sync started: {} trigger={}", sync_label, trigger)
         synced_at = datetime.utcnow()
-        tmdb_ids = RadarrService().get_owned_movie_tmdb_ids()
+        if radarr_service is None:
+            raise RuntimeError("Radarr integration service is required for owned media sync")
+        tmdb_ids = radarr_service.get_owned_movie_tmdb_ids()
         movie_metadata = _fetch_movie_metadata(tmdb_ids)
 
         (
@@ -310,6 +324,7 @@ def _sync_sonarr_owned_tv(
     database_session: Session,
     trigger: str,
     mark_running: bool,
+    sonarr_service: SonarrService | None = None,
 ) -> OwnedMediaSyncResponse:
     """Sync Sonarr owned episodes into the owned media table."""
     sync_label = f"{SONARR_SOURCE} {TV_MEDIA_TYPE}"
@@ -320,7 +335,8 @@ def _sync_sonarr_owned_tv(
             _mark_sync_running(database_session, SONARR_SOURCE, TV_MEDIA_TYPE, trigger)
         log.info("Owned media sync started: {} trigger={}", sync_label, trigger)
         synced_at = datetime.utcnow()
-        sonarr_service = SonarrService()
+        if sonarr_service is None:
+            raise RuntimeError("Sonarr integration service is required for owned media sync")
         tmdb_service = TmdbService()
         owned_rows: list[OwnedMedia] = []
 
@@ -858,6 +874,122 @@ def _delete_radarr_owned_movie(database_session: Session, tmdb_id: int) -> int:
     )
 
 
+def delete_radarr_owned_movie_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    radarr_service: RadarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete a Radarr movie from the server and Scenario's owned cache.
+
+    Args:
+        database_session: Database session dependency.
+        tmdb_id: TMDB movie identifier.
+        radarr_service: Configured Radarr service for the current user.
+
+    Returns:
+        OwnedMediaDeleteResponse: Deletion result summary.
+    """
+    try:
+        radarr_service.delete_movie_by_tmdb_id(tmdb_id, delete_files=True, add_exclusion=False)
+        deleted_count = _delete_radarr_owned_movie(database_session, tmdb_id)
+        _mark_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=MOVIE_MEDIA_TYPE,
+            scope=SCOPE_MOVIE,
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def delete_sonarr_owned_show_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    sonarr_service: SonarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete a Sonarr show from the server and Scenario's owned cache."""
+    sonarr_series_id = _get_sonarr_series_id(database_session, tmdb_id)
+    if sonarr_series_id is None:
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, None, None)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="show",
+            deleted_count=deleted_count,
+        )
+
+    try:
+        sonarr_service.delete_series_files(sonarr_series_id)
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, None, None)
+        _mark_sonarr_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="show",
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def delete_sonarr_owned_season_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    season_number: int,
+    sonarr_service: SonarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete one Sonarr season from the server and Scenario's owned cache."""
+    sonarr_series_id = _get_sonarr_series_id(database_session, tmdb_id)
+    if sonarr_series_id is None:
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, season_number, None)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="season",
+            season_number=season_number,
+            deleted_count=deleted_count,
+        )
+
+    try:
+        sonarr_service.delete_season_files(sonarr_series_id, season_number)
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, season_number, None)
+        _mark_sonarr_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="season",
+            season_number=season_number,
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def _get_sonarr_series_id(database_session: Session, tmdb_id: int) -> int | None:
+    """Return the Sonarr series ID for a locally owned TV show."""
+    owned_media = (
+        database_session.query(OwnedMedia)
+        .filter(
+            OwnedMedia.tmdb_id == tmdb_id,
+            OwnedMedia.media_type == TV_MEDIA_TYPE,
+            OwnedMedia.source == SONARR_SOURCE,
+            OwnedMedia.scope == SCOPE_EPISODE,
+            OwnedMedia.sonarr_series_id.isnot(None),
+        )
+        .first()
+    )
+    return int(owned_media.sonarr_series_id) if owned_media else None
+
+
 def _is_radarr_upgrade_delete(payload: RadarrWebhookPayload) -> bool:
     """Return whether a Radarr file-delete webhook is part of an upgrade."""
     if payload.isUpgrade is True:
@@ -1221,6 +1353,36 @@ def get_tv_availability_status(
         aired_episode_count=aired_total,
         seasons=seasons,
     )
+
+
+def get_owned_tv_availability_statuses(
+    database_session: Session,
+) -> list[TvAvailabilityResponse]:
+    """Return exact TV availability for every locally owned TV show.
+
+    Args:
+        database_session: Active SQLAlchemy database session.
+
+    Returns:
+        List of exact availability statuses keyed by TMDB show id.
+    """
+    tmdb_ids = [
+        row[0]
+        for row in database_session.query(OwnedMedia.tmdb_id)
+        .filter(
+            OwnedMedia.media_type == TV_MEDIA_TYPE,
+            OwnedMedia.source == SONARR_SOURCE,
+            OwnedMedia.scope == SCOPE_EPISODE,
+        )
+        .distinct()
+        .order_by(OwnedMedia.tmdb_id.asc())
+        .all()
+    ]
+
+    return [
+        get_tv_availability_status(tmdb_id, database_session)
+        for tmdb_id in tmdb_ids
+    ]
 
 
 def get_tv_season_availability_status(
