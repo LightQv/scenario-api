@@ -16,6 +16,7 @@ from sqlalchemy import and_, or_
 from app.core.logger import log
 from app.models import IntegrationSyncStatus, OwnedMedia
 from app.schemas import (
+    OwnedMediaDeleteResponse,
     OwnedMediaResponse,
     OwnedMediaStatusResponse,
     OwnedMediaSyncResponse,
@@ -871,6 +872,122 @@ def _delete_radarr_owned_movie(database_session: Session, tmdb_id: int) -> int:
         )
         .delete(synchronize_session=False)
     )
+
+
+def delete_radarr_owned_movie_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    radarr_service: RadarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete a Radarr movie from the server and Scenario's owned cache.
+
+    Args:
+        database_session: Database session dependency.
+        tmdb_id: TMDB movie identifier.
+        radarr_service: Configured Radarr service for the current user.
+
+    Returns:
+        OwnedMediaDeleteResponse: Deletion result summary.
+    """
+    try:
+        radarr_service.delete_movie_by_tmdb_id(tmdb_id, delete_files=True, add_exclusion=False)
+        deleted_count = _delete_radarr_owned_movie(database_session, tmdb_id)
+        _mark_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=MOVIE_MEDIA_TYPE,
+            scope=SCOPE_MOVIE,
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def delete_sonarr_owned_show_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    sonarr_service: SonarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete a Sonarr show from the server and Scenario's owned cache."""
+    sonarr_series_id = _get_sonarr_series_id(database_session, tmdb_id)
+    if sonarr_series_id is None:
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, None, None)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="show",
+            deleted_count=deleted_count,
+        )
+
+    try:
+        sonarr_service.delete_series_files(sonarr_series_id)
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, None, None)
+        _mark_sonarr_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="show",
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def delete_sonarr_owned_season_from_server(
+    database_session: Session,
+    tmdb_id: int,
+    season_number: int,
+    sonarr_service: SonarrService,
+) -> OwnedMediaDeleteResponse:
+    """Delete one Sonarr season from the server and Scenario's owned cache."""
+    sonarr_series_id = _get_sonarr_series_id(database_session, tmdb_id)
+    if sonarr_series_id is None:
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, season_number, None)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="season",
+            season_number=season_number,
+            deleted_count=deleted_count,
+        )
+
+    try:
+        sonarr_service.delete_season_files(sonarr_series_id, season_number)
+        deleted_count = _delete_sonarr_owned_episode(database_session, tmdb_id, season_number, None)
+        _mark_sonarr_webhook_sync_success(database_session)
+        database_session.commit()
+        return OwnedMediaDeleteResponse(
+            tmdb_id=tmdb_id,
+            media_type=TV_MEDIA_TYPE,
+            scope="season",
+            season_number=season_number,
+            deleted_count=deleted_count,
+        )
+    except Exception:
+        database_session.rollback()
+        raise
+
+
+def _get_sonarr_series_id(database_session: Session, tmdb_id: int) -> int | None:
+    """Return the Sonarr series ID for a locally owned TV show."""
+    owned_media = (
+        database_session.query(OwnedMedia)
+        .filter(
+            OwnedMedia.tmdb_id == tmdb_id,
+            OwnedMedia.media_type == TV_MEDIA_TYPE,
+            OwnedMedia.source == SONARR_SOURCE,
+            OwnedMedia.scope == SCOPE_EPISODE,
+            OwnedMedia.sonarr_series_id.isnot(None),
+        )
+        .first()
+    )
+    return int(owned_media.sonarr_series_id) if owned_media else None
 
 
 def _is_radarr_upgrade_delete(payload: RadarrWebhookPayload) -> bool:

@@ -79,6 +79,14 @@ class OwnedMediaStatusResponse(BaseModel):
     aired_episode_count: int | None = None
 
 
+class OwnedMediaDeleteResponse(BaseModel):
+    tmdb_id: int
+    media_type: str
+    scope: str
+    season_number: int | None = None
+    deleted_count: int
+
+
 class OwnedMediaSyncResponse(BaseModel):
     source: str = Field(description="Integration source used for the sync")
     media_type: str = Field(description="Media type synced from the source")

@@ -10,9 +10,9 @@ from app.schemas.media import MediaCreate, MediaUpdate, MediaResponse
 from app.schemas.bookmark import BookmarkCreate
 from app.schemas.view import ViewCreate, ViewResponse, ViewCountByType, ViewCountByYear, ViewRuntime
 from app.schemas.owned_media import (
-    OwnedMediaResponse, OwnedMediaStatusResponse, OwnedMediaSyncResponse,
-    OwnedMediaSyncStatusResponse, RadarrWebhookPayload, RadarrWebhookResponse,
-    SonarrWebhookPayload, SonarrWebhookResponse, TvAvailabilityResponse,
+    OwnedMediaDeleteResponse, OwnedMediaResponse, OwnedMediaStatusResponse,
+    OwnedMediaSyncResponse, OwnedMediaSyncStatusResponse, RadarrWebhookPayload,
+    RadarrWebhookResponse, SonarrWebhookPayload, SonarrWebhookResponse, TvAvailabilityResponse,
     TvEpisodeAvailabilityResponse, TvSeasonAvailabilityResponse
 )
 from app.schemas.download_request import (
@@ -35,8 +35,8 @@ __all__ = [
     "MediaCreate", "MediaUpdate", "MediaResponse",
     "BookmarkCreate",
     "ViewCreate", "ViewResponse", "ViewCountByType", "ViewCountByYear", "ViewRuntime",
-    "OwnedMediaResponse", "OwnedMediaStatusResponse", "OwnedMediaSyncResponse",
-    "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse",
+    "OwnedMediaDeleteResponse", "OwnedMediaResponse", "OwnedMediaStatusResponse",
+    "OwnedMediaSyncResponse", "OwnedMediaSyncStatusResponse", "RadarrWebhookPayload", "RadarrWebhookResponse",
     "SonarrWebhookPayload", "SonarrWebhookResponse", "TvAvailabilityResponse",
     "TvEpisodeAvailabilityResponse", "TvSeasonAvailabilityResponse",
     "DownloadRequestResponse", "RadarrMovieDownloadCreate", "SonarrSeasonDownloadCreate",
