@@ -55,13 +55,7 @@ class Settings(BaseSettings):
 
     # Media server integrations
     TMDB_API_TOKEN: str
-    RADARR_URL: str
-    RADARR_API_KEY: str
     RADARR_WEBHOOK_SECRET: str
-    RADARR_ROOT_FOLDER_PATH: str
-    RADARR_QUALITY_PROFILE_ID: int
-    SONARR_URL: str = ""
-    SONARR_API_KEY: str = ""
     SONARR_WEBHOOK_SECRET: str = ""
     SONARR_ON_AIR_RECENCY_DAYS: int = 21
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True

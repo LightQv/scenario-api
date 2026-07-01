@@ -8,7 +8,6 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.logger import log
-from app.core.settings import settings
 
 SONARR_SERIES_TYPE = "standard"
 SONARR_ANIME_SERIES_TYPE = "anime"
@@ -25,8 +24,8 @@ class SonarrService:
 
     def __init__(
         self,
-        url: str | None = None,
-        api_key: str | None = None,
+        url: str,
+        api_key: str,
         root_folder_path: str | None = None,
         anime_root_folder_path: str | None = None,
         quality_profile_id: int | None = None,
@@ -41,8 +40,8 @@ class SonarrService:
         season_folder: bool | None = None,
         use_anime_series_type: bool | None = None,
     ):
-        self.url: str = (url or settings.SONARR_URL).rstrip("/")
-        self.api_key: str = api_key or settings.SONARR_API_KEY
+        self.url: str = url.rstrip("/")
+        self.api_key: str = api_key
         self.root_folder_path: str | None = root_folder_path
         self.anime_root_folder_path: str | None = anime_root_folder_path
         self.quality_profile_id: int | None = quality_profile_id
