@@ -29,6 +29,7 @@ from app.services.owned_media_service import (
     SyncAlreadyRunningError,
     get_owned_media,
     get_radarr_owned_movies_sync_status,
+    get_owned_tv_availability_statuses,
     get_owned_media_sync_status,
     get_owned_media_status,
     get_tv_availability_status,
@@ -265,6 +266,20 @@ def owned_media_status(
     availability from locally synced owned episodes.
     """
     return get_owned_media_status(tmdb_id, media_type, database_session)
+
+
+@router.get(
+    "/tv/statuses",
+    response_model=list[TvAvailabilityResponse],
+    summary="Get all owned TV availability statuses",
+    description="Return exact TV availability for all locally synced Sonarr shows.",
+)
+def tv_availability_statuses(
+    _: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> list[TvAvailabilityResponse]:
+    """Return exact TV availability for all owned TV shows."""
+    return get_owned_tv_availability_statuses(database_session)
 
 
 @router.get(

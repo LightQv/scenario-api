@@ -1238,6 +1238,36 @@ def get_tv_availability_status(
     )
 
 
+def get_owned_tv_availability_statuses(
+    database_session: Session,
+) -> list[TvAvailabilityResponse]:
+    """Return exact TV availability for every locally owned TV show.
+
+    Args:
+        database_session: Active SQLAlchemy database session.
+
+    Returns:
+        List of exact availability statuses keyed by TMDB show id.
+    """
+    tmdb_ids = [
+        row[0]
+        for row in database_session.query(OwnedMedia.tmdb_id)
+        .filter(
+            OwnedMedia.media_type == TV_MEDIA_TYPE,
+            OwnedMedia.source == SONARR_SOURCE,
+            OwnedMedia.scope == SCOPE_EPISODE,
+        )
+        .distinct()
+        .order_by(OwnedMedia.tmdb_id.asc())
+        .all()
+    ]
+
+    return [
+        get_tv_availability_status(tmdb_id, database_session)
+        for tmdb_id in tmdb_ids
+    ]
+
+
 def get_tv_season_availability_status(
     tmdb_id: int,
     season_number: int,
