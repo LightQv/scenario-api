@@ -36,6 +36,9 @@ class OwnedMediaScheduler:
         """
         Start the background scheduler task if enabled.
         """
+        log.info("Owned media auto-sync scheduler is disabled for per-user integrations")
+        return
+
         if not settings.OWNED_MEDIA_AUTO_SYNC_ENABLED:
             log.info("Owned media auto-sync scheduler is disabled")
             return

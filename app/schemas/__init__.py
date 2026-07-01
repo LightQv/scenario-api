@@ -19,6 +19,13 @@ from app.schemas.download_request import (
     DownloadRequestResponse, RadarrMovieDownloadCreate, SonarrSeasonDownloadCreate,
     SonarrSeriesDownloadCreate
 )
+from app.schemas.user_settings import (
+    DownloadSettingsOverview, IntegrationSummary, RadarrOptionsResponse,
+    RadarrSettingsPatch, RadarrSettingsResponse, SelectOption,
+    SonarrOptionsResponse, SonarrProfileConfig, SonarrProfileType,
+    SonarrProfileUpsert, SonarrSettingsPatch, SonarrSettingsResponse,
+    TestConnectionResponse,
+)
 
 __all__ = [
     "UserRegister", "UserLogin", "PasswordReset", "ForgottenPassword", "Token",
@@ -33,5 +40,10 @@ __all__ = [
     "SonarrWebhookPayload", "SonarrWebhookResponse", "TvAvailabilityResponse",
     "TvEpisodeAvailabilityResponse", "TvSeasonAvailabilityResponse",
     "DownloadRequestResponse", "RadarrMovieDownloadCreate", "SonarrSeasonDownloadCreate",
-    "SonarrSeriesDownloadCreate"
+    "SonarrSeriesDownloadCreate",
+    "DownloadSettingsOverview", "IntegrationSummary", "RadarrOptionsResponse",
+    "RadarrSettingsPatch", "RadarrSettingsResponse", "SelectOption",
+    "SonarrOptionsResponse", "SonarrProfileConfig", "SonarrProfileType",
+    "SonarrProfileUpsert", "SonarrSettingsPatch", "SonarrSettingsResponse",
+    "TestConnectionResponse",
 ]

@@ -14,13 +14,24 @@ from fastapi import HTTPException, status
 
 from app.core.settings import settings
 
+RADARR_MINIMUM_AVAILABILITY = "released"
+
 
 class RadarrService:
     """Client wrapper for Radarr movie library operations."""
 
-    def __init__(self, url: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        root_folder_path: str | None = None,
+        quality_profile_id: int | None = None,
+    ):
         self.url: str = (url or settings.RADARR_URL).rstrip("/")
         self.api_key: str = api_key or settings.RADARR_API_KEY
+        self.root_folder_path: str = root_folder_path or settings.RADARR_ROOT_FOLDER_PATH
+        self.quality_profile_id: int = quality_profile_id or settings.RADARR_QUALITY_PROFILE_ID
+        self.minimum_availability: str = RADARR_MINIMUM_AVAILABILITY
 
     def get_movies(self) -> list[dict[str, Any]]:
         """
@@ -101,12 +112,12 @@ class RadarrService:
         try:
             added_movie = self._client().movie.add(
                 movie=movie,
-                root_dir=settings.RADARR_ROOT_FOLDER_PATH,
-                quality_profile_id=settings.RADARR_QUALITY_PROFILE_ID,
+                root_dir=self.root_folder_path,
+                quality_profile_id=self.quality_profile_id,
                 monitored=True,
                 search_for_movie=False,
                 monitor="movieOnly",
-                minimum_availability=settings.RADARR_MINIMUM_AVAILABILITY,
+                minimum_availability=self.minimum_availability,
                 tags=tag_ids or None,
             )
             radarr_movie_id = added_movie.get("id")

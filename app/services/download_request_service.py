@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.logger import log
 from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.models import DownloadRequest, OwnedMedia, User
@@ -14,6 +15,11 @@ from app.schemas import DownloadRequestResponse
 from app.services.radarr_service import RadarrService
 from app.services.sonarr_service import SonarrService
 from app.services.tmdb_service import TmdbMovieMetadata, TmdbService, TmdbTvMetadata
+from app.services.user_integration_settings_service import (
+    IntegrationRuntimeConfig,
+    get_enabled_radarr_config,
+    get_enabled_sonarr_config,
+)
 
 RADARR_SOURCE = "RADARR"
 SONARR_SOURCE = "SONARR"
@@ -24,6 +30,11 @@ SCOPE_SERIES = "series"
 SCOPE_SEASON = "season"
 ANIMATION_GENRE_ID = 16
 ANIME_TAG_LABEL = "anime"
+TV_ON_AIR_TAG_LABEL = "tv-onair"
+TV_COMPLETE_TAG_LABEL = "tv-complete"
+SONARR_PROFILE_TV_ON_AIR = "tv_on_air"
+SONARR_PROFILE_TV_COMPLETE = "tv_complete"
+SONARR_PROFILE_ANIME = "anime"
 
 DOWNLOAD_STATUS_REQUESTED = "requested"
 DOWNLOAD_STATUS_SENT_TO_RADARR = "sent_to_radarr"
@@ -61,6 +72,7 @@ def request_radarr_movie_download(
     background_tasks: BackgroundTasks | None = None,
 ) -> DownloadRequestResponse:
     """Create or reuse a Radarr movie request and trigger automatic search."""
+    get_enabled_radarr_config(database_session, user.id)
     existing_request = get_download_request_for_media(
         tmdb_id,
         MOVIE_MEDIA_TYPE,
@@ -124,7 +136,8 @@ def process_radarr_movie_download_request(request_id: UUID) -> None:
         database_session.commit()
 
         try:
-            radarr_movie = RadarrService().add_movie_and_search(
+            runtime_config = get_enabled_radarr_config(database_session, download_request.user_id)
+            radarr_movie = _radarr_service_from_runtime_config(runtime_config).add_movie_and_search(
                 download_request.tmdb_id,
                 tag_labels=_get_radarr_tag_labels(metadata),
             )
@@ -201,7 +214,8 @@ def retry_download_request(
     database_session.commit()
 
     try:
-        radarr_movie = RadarrService().add_movie_and_search(
+        runtime_config = get_enabled_radarr_config(database_session, download_request.user_id)
+        radarr_movie = _radarr_service_from_runtime_config(runtime_config).add_movie_and_search(
             download_request.tmdb_id,
             tag_labels=_get_radarr_tag_labels(metadata),
         )
@@ -230,18 +244,25 @@ def cancel_download_request(
     if download_request.source == SONARR_SOURCE:
         return _cancel_sonarr_request(download_request, database_session)
 
-    radarr_service = RadarrService()
+    radarr_service = None
+    if download_request.user_id is not None:
+        try:
+            runtime_config = get_enabled_radarr_config(database_session, download_request.user_id)
+            radarr_service = _radarr_service_from_runtime_config(runtime_config)
+        except HTTPException:
+            radarr_service = None
 
-    queue_record = _find_queue_record_for_request(
-        download_request,
-        radarr_service.get_queue(),
-    )
-    if queue_record:
-        queue_item_id = _safe_int(queue_record.get("id"))
-        if queue_item_id is not None:
-            radarr_service.delete_queue_item(queue_item_id)
+    if radarr_service is not None:
+        queue_record = _find_queue_record_for_request(
+            download_request,
+            radarr_service.get_queue(),
+        )
+        if queue_record:
+            queue_item_id = _safe_int(queue_record.get("id"))
+            if queue_item_id is not None:
+                radarr_service.delete_queue_item(queue_item_id)
 
-    if download_request.radarr_movie_id is not None:
+    if radarr_service is not None and download_request.radarr_movie_id is not None:
         radarr_service.delete_movie_if_unavailable(download_request.radarr_movie_id)
 
     download_request.status = DOWNLOAD_STATUS_CANCELLED
@@ -440,6 +461,13 @@ def mark_sonarr_request_grabbed(
     updated_count = 0
     for download_request in download_requests:
         if download_request.scope == SCOPE_SEASON and season_number != download_request.season_number:
+            log.info(
+                "Sonarr grab ignored for request season: request_id={} requested_season={} grabbed_season={} title={}",
+                download_request.id,
+                download_request.season_number,
+                season_number,
+                _extract_grab_title(payload_data),
+            )
             continue
         download_request.status = DOWNLOAD_STATUS_DOWNLOADING
         download_request.error_message = None
@@ -504,7 +532,8 @@ def _reconcile_radarr_download_requests(database_session: Session) -> None:
 
     if pending_requests:
         try:
-            radarr_service = RadarrService()
+            runtime_config = get_enabled_radarr_config(database_session, download_request.user_id)
+            radarr_service = _radarr_service_from_runtime_config(runtime_config)
             queue_records = radarr_service.get_queue()
         except HTTPException:
             database_session.commit()
@@ -545,7 +574,8 @@ def _reconcile_sonarr_download_requests(database_session: Session) -> None:
 
     if pending_requests:
         try:
-            sonarr_service = SonarrService()
+            runtime_config = get_enabled_sonarr_config(database_session, download_request.user_id)
+            sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
             queue_records = sonarr_service.get_queue()
         except HTTPException:
             database_session.commit()
@@ -642,6 +672,7 @@ def _request_sonarr_download(
     background_tasks: BackgroundTasks | None = None,
 ) -> DownloadRequestResponse:
     """Create or reuse a scoped Sonarr request and trigger search."""
+    get_enabled_sonarr_config(database_session, user.id)
     existing_request = get_download_request_for_scope(
         tmdb_id,
         TV_MEDIA_TYPE,
@@ -716,19 +747,33 @@ def process_sonarr_download_request(request_id: UUID) -> None:
                 detail="TMDB TV series does not have a TVDB ID",
             )
         is_anime = _is_anime_tv(metadata)
+        runtime_config = get_enabled_sonarr_config(database_session, download_request.user_id)
         use_on_air_profile = _sonarr_request_uses_on_air_profile(
             download_request.tmdb_id,
             scope,
             season_number,
         )
-        sonarr_service = SonarrService()
+        profile_type = _get_sonarr_profile_type(metadata, use_on_air_profile)
+        tag_labels = _get_sonarr_tag_labels(metadata, use_on_air_profile, runtime_config.config)
+        log.info(
+            "Sonarr request routing: request_id={} tmdb_id={} tvdb_id={} scope={} requested_season={} profile_type={} tag_labels={} recency_days={}",
+            download_request.id,
+            download_request.tmdb_id,
+            tvdb_id,
+            scope,
+            season_number,
+            profile_type,
+            tag_labels,
+            settings.SONARR_ON_AIR_RECENCY_DAYS,
+        )
+        sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
         sonarr_series = sonarr_service.add_series_and_search(
             tvdb_id=tvdb_id,
             tmdb_id=download_request.tmdb_id,
             season_number=season_number,
             is_anime=is_anime,
             use_on_air_profile=use_on_air_profile,
-            tag_labels=_get_sonarr_tag_labels(metadata, use_on_air_profile),
+            tag_labels=tag_labels,
         )
         download_request.tvdb_id = tvdb_id
         download_request.sonarr_series_id = _extract_sonarr_series_id(sonarr_series)
@@ -841,8 +886,16 @@ def _cancel_sonarr_request(
     database_session: Session,
 ) -> DownloadRequestResponse:
     """Cancel a local Sonarr request and remove matching active queue state."""
-    sonarr_service = SonarrService()
+    sonarr_service = None
+    if download_request.user_id is not None:
+        try:
+            runtime_config = get_enabled_sonarr_config(database_session, download_request.user_id)
+            sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
+        except HTTPException:
+            sonarr_service = None
     try:
+        if sonarr_service is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sonarr integration is disabled")
         episode_maps: dict[int, dict[int, tuple[int | None, int | None]]] = {}
         episode_map = _get_sonarr_episode_map_for_request(
             sonarr_service,
@@ -877,23 +930,68 @@ def _get_radarr_tag_labels(metadata: TmdbMovieMetadata) -> list[str]:
     return []
 
 
+def _radarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig) -> RadarrService:
+    """Build a Radarr service from decrypted per-user settings."""
+    config = runtime_config.config
+    return RadarrService(
+        url=config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=config.get("root_folder_path"),
+        quality_profile_id=config.get("quality_profile_id"),
+    )
+
+
+def _sonarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig) -> SonarrService:
+    """Build a Sonarr service from decrypted per-user settings."""
+    config = runtime_config.config
+    profiles = config.get("profiles") if isinstance(config.get("profiles"), dict) else {}
+    tv_on_air_profile = profiles.get(SONARR_PROFILE_TV_ON_AIR) or {}
+    tv_complete_profile = profiles.get(SONARR_PROFILE_TV_COMPLETE) or {}
+    anime_profile = profiles.get(SONARR_PROFILE_ANIME) or {}
+    return SonarrService(
+        url=config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=tv_on_air_profile.get("root_folder_path") or tv_complete_profile.get("root_folder_path"),
+        anime_root_folder_path=anime_profile.get("root_folder_path"),
+        quality_profile_id=tv_on_air_profile.get("quality_profile_id") or tv_complete_profile.get("quality_profile_id"),
+        on_air_quality_profile_id=tv_on_air_profile.get("quality_profile_id"),
+        complete_quality_profile_id=tv_complete_profile.get("quality_profile_id"),
+        anime_quality_profile_id=anime_profile.get("quality_profile_id"),
+        language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
+        anime_language_profile_id=anime_profile.get("language_profile_id"),
+    )
+
+
 def _get_sonarr_tag_labels(
     metadata: TmdbTvMetadata,
     use_on_air_profile: bool,
+    config: dict,
 ) -> list[str]:
     """Return Sonarr tags Scenario should apply for a TV request."""
     tag_labels: list[str] = []
 
     if _is_anime_tv(metadata):
-        _append_tag_label(tag_labels, settings.SONARR_ANIME_TAG_LABEL)
+        _append_tag_label(tag_labels, ANIME_TAG_LABEL)
         return tag_labels
 
     if use_on_air_profile:
-        _append_tag_label(tag_labels, settings.SONARR_ON_AIR_TAG_LABEL)
+        _append_tag_label(tag_labels, TV_ON_AIR_TAG_LABEL)
     else:
-        _append_tag_label(tag_labels, settings.SONARR_COMPLETE_TAG_LABEL)
+        _append_tag_label(tag_labels, TV_COMPLETE_TAG_LABEL)
 
     return tag_labels
+
+
+def _get_sonarr_profile_type(
+    metadata: TmdbTvMetadata,
+    use_on_air_profile: bool,
+) -> str:
+    """Return the Scenario Sonarr profile type selected for a request."""
+    if _is_anime_tv(metadata):
+        return SONARR_PROFILE_ANIME
+    if use_on_air_profile:
+        return SONARR_PROFILE_TV_ON_AIR
+    return SONARR_PROFILE_TV_COMPLETE
 
 
 def _append_tag_label(tag_labels: list[str], label: str | None) -> None:
@@ -1191,10 +1289,15 @@ def _find_sonarr_queue_records_for_request(
         if _sonarr_record_title_matches_request(download_request, queue_record):
             records.append(queue_record)
             continue
-        if download_request.scope == SCOPE_SEASON and download_request.season_number not in _sonarr_record_season_numbers(
-            queue_record,
-            episode_map,
-        ):
+        record_season_numbers = _sonarr_record_season_numbers(queue_record, episode_map)
+        if download_request.scope == SCOPE_SEASON and download_request.season_number not in record_season_numbers:
+            log.info(
+                "Sonarr queue record rejected for request season: request_id={} requested_season={} record_seasons={} title={}",
+                download_request.id,
+                download_request.season_number,
+                sorted(record_season_numbers),
+                _sonarr_record_title(queue_record),
+            )
             continue
         records.append(queue_record)
     return records
@@ -1220,6 +1323,12 @@ def _sonarr_record_title_matches_request(
         (record.get("data") or {}).get("sourceTitle"),
     ]
     return any(_normalize_release_title(title) == request_title for title in candidate_titles)
+
+
+def _sonarr_record_title(record: dict) -> object:
+    """Return the best available Sonarr queue/history title for logging."""
+    data = record.get("data") or {}
+    return record.get("title") or record.get("sourceTitle") or data.get("sourceTitle")
 
 
 def _normalize_release_title(value: object) -> str:
@@ -1287,10 +1396,15 @@ def _find_sonarr_history_record_for_request(
         tvdb_id = _safe_int(series.get("tvdbId"))
         if not _sonarr_series_matches(download_request, series_id, tvdb_id):
             continue
-        if download_request.scope == SCOPE_SEASON and download_request.season_number not in _sonarr_record_season_numbers(
-            history_record,
-            episode_map,
-        ):
+        record_season_numbers = _sonarr_record_season_numbers(history_record, episode_map)
+        if download_request.scope == SCOPE_SEASON and download_request.season_number not in record_season_numbers:
+            log.info(
+                "Sonarr history record rejected for request season: request_id={} requested_season={} record_seasons={} title={}",
+                download_request.id,
+                download_request.season_number,
+                sorted(record_season_numbers),
+                _sonarr_record_title(history_record),
+            )
             continue
         return history_record
     return None

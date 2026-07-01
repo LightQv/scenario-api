@@ -1,20 +1,65 @@
 """Sonarr integration service for TV series ownership and requests."""
 
 from datetime import datetime, timezone
+from time import sleep
 from typing import Any
 
 import httpx
 from fastapi import HTTPException, status
 
+from app.core.logger import log
 from app.core.settings import settings
+
+SONARR_SERIES_TYPE = "standard"
+SONARR_ANIME_SERIES_TYPE = "anime"
+SONARR_MONITOR_MODE = "all"
+SONARR_SEASON_FOLDER = True
+SONARR_USE_ANIME_SERIES_TYPE = True
+SCENARIO_SONARR_TAG_LABELS = {"tv-onair", "tv-complete", "anime"}
+SONARR_EPISODE_REFRESH_ATTEMPTS = 15
+SONARR_EPISODE_REFRESH_INTERVAL_SECONDS = 1
 
 
 class SonarrService:
     """Client wrapper for Sonarr TV library operations."""
 
-    def __init__(self, url: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        root_folder_path: str | None = None,
+        anime_root_folder_path: str | None = None,
+        quality_profile_id: int | None = None,
+        on_air_quality_profile_id: int | None = None,
+        complete_quality_profile_id: int | None = None,
+        anime_quality_profile_id: int | None = None,
+        language_profile_id: int | None = None,
+        anime_language_profile_id: int | None = None,
+        series_type: str | None = None,
+        anime_series_type: str | None = None,
+        monitor_mode: str | None = None,
+        season_folder: bool | None = None,
+        use_anime_series_type: bool | None = None,
+    ):
         self.url: str = (url or settings.SONARR_URL).rstrip("/")
         self.api_key: str = api_key or settings.SONARR_API_KEY
+        self.root_folder_path: str | None = root_folder_path
+        self.anime_root_folder_path: str | None = anime_root_folder_path
+        self.quality_profile_id: int | None = quality_profile_id
+        self.on_air_quality_profile_id: int | None = on_air_quality_profile_id
+        self.complete_quality_profile_id: int | None = complete_quality_profile_id
+        self.anime_quality_profile_id: int | None = anime_quality_profile_id
+        self.language_profile_id: int | None = language_profile_id
+        self.anime_language_profile_id: int | None = anime_language_profile_id
+        self.series_type: str = series_type or SONARR_SERIES_TYPE
+        self.anime_series_type: str = anime_series_type or SONARR_ANIME_SERIES_TYPE
+        self.monitor_mode: str = monitor_mode or SONARR_MONITOR_MODE
+        self.season_folder: bool = SONARR_SEASON_FOLDER if season_folder is None else season_folder
+        self.use_anime_series_type: bool = (
+            SONARR_USE_ANIME_SERIES_TYPE
+            if use_anime_series_type is None
+            else use_anime_series_type
+        )
 
     def get_series(self) -> list[dict[str, Any]]:
         """Fetch series currently known by Sonarr."""
@@ -77,6 +122,7 @@ class SonarrService:
                 )
                 command_ids = [self.extract_command_id(command) for command in commands]
                 command_ids = [command_id for command_id in command_ids if command_id is not None]
+                self._log_search_queued(sonarr_series_id, season_number, command_ids)
                 existing_series["_scenario_search_command_ids"] = command_ids
                 existing_series["_scenario_search_command_id"] = command_ids[0] if command_ids else None
             return existing_series
@@ -91,6 +137,7 @@ class SonarrService:
         )
         sonarr_series_id = _safe_int(added_series.get("id"))
         if sonarr_series_id:
+            self._wait_for_episode_refresh(sonarr_series_id, season_number)
             commands = (
                 [self.search_season(sonarr_series_id, season_number)]
                 if season_number is not None
@@ -98,6 +145,7 @@ class SonarrService:
             )
             command_ids = [self.extract_command_id(command) for command in commands]
             command_ids = [command_id for command_id in command_ids if command_id is not None]
+            self._log_search_queued(sonarr_series_id, season_number, command_ids)
             added_series["_scenario_search_command_ids"] = command_ids
             added_series["_scenario_search_command_id"] = command_ids[0] if command_ids else None
         return added_series
@@ -115,7 +163,7 @@ class SonarrService:
         series = self.lookup_series_by_tvdb_id(tvdb_id)
         tag_ids = self._resolve_tag_ids(tag_labels or [])
         config = self._profile_config(is_anime, use_on_air_profile)
-        monitor_mode = "missing" if season_number is not None else settings.SONARR_MONITOR_MODE
+        monitor_mode = "missing" if season_number is not None else self.monitor_mode
         self._apply_new_series_season_monitoring(series, season_number)
         payload = {
             **series,
@@ -124,7 +172,7 @@ class SonarrService:
             "qualityProfileId": config["qualityProfileId"],
             "monitored": True,
             "monitor": monitor_mode,
-            "seasonFolder": settings.SONARR_SEASON_FOLDER,
+            "seasonFolder": self.season_folder,
             "addOptions": {
                 "monitor": monitor_mode,
                 "searchForMissingEpisodes": False,
@@ -318,9 +366,16 @@ class SonarrService:
             changed = True
 
         current_tag_ids = set(series.get("tags") or [])
-        missing_tag_ids = [tag_id for tag_id in tag_ids if tag_id not in current_tag_ids]
-        if missing_tag_ids:
-            series["tags"] = sorted(current_tag_ids.union(missing_tag_ids))
+        scenario_tag_ids = set(self._scenario_tag_ids())
+        next_tag_ids = sorted((current_tag_ids - scenario_tag_ids).union(tag_ids))
+        if next_tag_ids != sorted(current_tag_ids):
+            log.info(
+                "Sonarr scenario tags replaced: series_id={} previous_tags={} next_tags={}",
+                series.get("id"),
+                sorted(current_tag_ids),
+                next_tag_ids,
+            )
+            series["tags"] = next_tag_ids
             changed = True
 
         if series.get("monitored") is not True:
@@ -367,6 +422,38 @@ class SonarrService:
             return series
         updated_series = self._request("PUT", f"/series/{series_id}", json=series)
         return updated_series if isinstance(updated_series, dict) else series
+
+    def _wait_for_episode_refresh(
+        self,
+        sonarr_series_id: int,
+        season_number: int | None,
+    ) -> None:
+        """Wait briefly for Sonarr to populate episodes after adding a series."""
+        for attempt in range(1, SONARR_EPISODE_REFRESH_ATTEMPTS + 1):
+            episodes = self.get_episodes(sonarr_series_id)
+            matching_episodes = [
+                episode
+                for episode in episodes
+                if season_number is None or _safe_int(episode.get("seasonNumber")) == season_number
+            ]
+            if matching_episodes:
+                if attempt > 1:
+                    log.info(
+                        "Sonarr episode refresh ready: series_id={} requested_season={} attempts={} episode_count={}",
+                        sonarr_series_id,
+                        season_number,
+                        attempt,
+                        len(matching_episodes),
+                    )
+                return
+            sleep(SONARR_EPISODE_REFRESH_INTERVAL_SECONDS)
+
+        log.info(
+            "Sonarr episode refresh not ready before search: series_id={} requested_season={} attempts={}",
+            sonarr_series_id,
+            season_number,
+            SONARR_EPISODE_REFRESH_ATTEMPTS,
+        )
 
     @staticmethod
     def _apply_new_series_season_monitoring(
@@ -417,28 +504,62 @@ class SonarrService:
             return None
         return _safe_int(created_tag.get("id"))
 
+    def _scenario_tag_ids(self) -> list[int]:
+        """Return IDs for Scenario-owned Sonarr intent tags."""
+        return [
+            tag_id
+            for label in SCENARIO_SONARR_TAG_LABELS
+            if (tag_id := self._get_or_create_tag_id(label)) is not None
+        ]
+
     @staticmethod
-    def _profile_config(is_anime: bool, use_on_air_profile: bool = False) -> dict[str, Any]:
+    def _log_search_queued(
+        sonarr_series_id: int,
+        season_number: int | None,
+        command_ids: list[int],
+    ) -> None:
+        """Log the Sonarr search command Scenario queued."""
+        if season_number is not None:
+            log.info(
+                "Sonarr search queued: series_id={} command=SeasonSearch requested_season={} command_id={}",
+                sonarr_series_id,
+                season_number,
+                command_ids[0] if command_ids else None,
+            )
+            return
+        log.info(
+            "Sonarr search queued: series_id={} command=MissingSeasonSearch command_ids={}",
+            sonarr_series_id,
+            command_ids,
+        )
+
+    def _profile_config(self, is_anime: bool, use_on_air_profile: bool = False) -> dict[str, Any]:
         """Return Sonarr profile config for a normal or anime series."""
-        quality_profile_id = settings.SONARR_QUALITY_PROFILE_ID
-        if not is_anime and use_on_air_profile and settings.SONARR_ON_AIR_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_ON_AIR_QUALITY_PROFILE_ID
-        if not is_anime and not use_on_air_profile and settings.SONARR_COMPLETE_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_COMPLETE_QUALITY_PROFILE_ID
-        if is_anime and settings.SONARR_ANIME_QUALITY_PROFILE_ID is not None:
-            quality_profile_id = settings.SONARR_ANIME_QUALITY_PROFILE_ID
+        quality_profile_id = self.quality_profile_id
+        if not is_anime and use_on_air_profile and self.on_air_quality_profile_id is not None:
+            quality_profile_id = self.on_air_quality_profile_id
+        if not is_anime and not use_on_air_profile and self.complete_quality_profile_id is not None:
+            quality_profile_id = self.complete_quality_profile_id
+        if is_anime and self.anime_quality_profile_id is not None:
+            quality_profile_id = self.anime_quality_profile_id
 
-        language_profile_id = settings.SONARR_LANGUAGE_PROFILE_ID
-        if is_anime and settings.SONARR_ANIME_LANGUAGE_PROFILE_ID is not None:
-            language_profile_id = settings.SONARR_ANIME_LANGUAGE_PROFILE_ID
+        language_profile_id = self.language_profile_id
+        if is_anime and self.anime_language_profile_id is not None:
+            language_profile_id = self.anime_language_profile_id
 
-        root_folder_path = settings.SONARR_ROOT_FOLDER_PATH
-        if is_anime and settings.SONARR_ANIME_ROOT_FOLDER_PATH:
-            root_folder_path = settings.SONARR_ANIME_ROOT_FOLDER_PATH
+        root_folder_path = self.root_folder_path
+        if is_anime and self.anime_root_folder_path:
+            root_folder_path = self.anime_root_folder_path
 
-        series_type = settings.SONARR_SERIES_TYPE
-        if is_anime and settings.SONARR_USE_ANIME_SERIES_TYPE:
-            series_type = settings.SONARR_ANIME_SERIES_TYPE
+        if not root_folder_path or quality_profile_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Sonarr integration is not configured",
+            )
+
+        series_type = self.series_type
+        if is_anime and self.use_anime_series_type:
+            series_type = self.anime_series_type
 
         return {
             "rootFolderPath": root_folder_path,
