@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     SONARR_ON_AIR_RECENCY_DAYS: int = 21
     SONARR_SEASON_FOLDER: bool = True
     SONARR_ANIME_TAG_LABEL: str = "anime"
+    SONARR_ON_AIR_TAG_LABEL: str = "tv-onair"
+    SONARR_COMPLETE_TAG_LABEL: str = "tv-complete"
     SONARR_USE_ANIME_SERIES_TYPE: bool = True
     OWNED_MEDIA_AUTO_SYNC_ENABLED: bool = True
     OWNED_MEDIA_SYNC_HOURS: list[int] = [0, 6, 12, 18]
