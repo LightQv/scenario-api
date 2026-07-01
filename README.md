@@ -1,132 +1,187 @@
-# 🎬 SCENARIO API
+<div align="center">
 
-**FastAPI backend for Scenario Web Client**  
-Manage your watchlists and track your movie & TV show viewing history with a modern API built on FastAPI.
+<img src="https://raw.githubusercontent.com/LightQv/scenario-expo/main/assets/images/icon.png" alt="Scenario icon" width="96" height="96" />
 
-## 📊 Badges
+# SCENARIO API
 
-<p align="left">
-  <a href="https://github.com/LightQv/scenario-api/stargazers">
-    <img src="https://img.shields.io/github/stars/LightQv/scenario-api?style=for-the-badge&logo=github" alt="GitHub stars"/>
-  </a>
-  <a href="https://github.com/LightQv/scenario-api/issues">
-    <img src="https://img.shields.io/github/issues/LightQv/scenario-api?style=for-the-badge&logo=github" alt="GitHub issues"/>
-  </a>
-  <a href="https://github.com/LightQv/scenario-api/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/LightQv/scenario-api?style=for-the-badge" alt="License"/>
-  </a>
-  <a href="https://github.com/LightQv/scenario-api/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/LightQv/scenario-api/.github/workflows/prod-api-docker.yml?style=for-the-badge&logo=github" alt="CI Status"/>
-  </a>
-</p>
+FastAPI backend for authentication, watchlists, viewing history, statistics, and media metadata persistence.
 
-## 🛠️ Technologies
+[About](#about) · [Setup](#setup) · [Development](#development) · [Database](#database) · [Configuration](#configuration) · [API Documentation](#api-documentation) · [Related Projects](#related-projects) · [License](#license)
 
-![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
-![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-%232496ED.svg?style=for-the-badge&logo=docker&logoColor=white)
-![Nginx](https://img.shields.io/badge/Nginx-%2325C65B.svg?style=for-the-badge&logo=nginx&logoColor=white)
+</div>
 
-## ✨ Features
+---
 
-- ✅ Full authentication: registration, login, password reset
-- 🎬 Watchlist management: create, edit, delete lists of movies & TV shows
-- 👁️ Viewing history: track watched content
-- 📊 Statistics: analyze viewing habits
-- 🔐 Security: JWT tokens with HTTPOnly cookies, bcrypt password hashing
-- 📧 Email system: password reset via email
-- 🐳 Multi-environments: development, staging, production with Docker
-- 🔍 Monitoring: logging with Loguru, error tracking with Sentry
+## About
 
-## 🏗️ Project Structure
+Scenario API is the backend service for the Scenario movie and TV tracking applications.
 
-```
-app/
-├── core/              # Configuration, database, security
-├── models/            # SQLAlchemy models
-├── schemas/           # Pydantic schemas
-├── api/v1/            # API routes
-├── services/          # Business logic
-├── utils/             # Utilities (email templates, etc.)
-└── database/          # Database tools and backups
-├── backup/        # SQL dump files
-└── restore\_data.py # Database restore script
-```
+It provides user authentication, profile management, watchlists, viewing history, statistics, uploads, and persistence for media records consumed by the web and mobile clients. Authentication uses JWT tokens stored in HTTPOnly cookies.
 
-## ⚙️ Installation
+Core components:
 
-1. **Clone the repository**
+- FastAPI application and versioned API routes
+- PostgreSQL persistence with SQLAlchemy and Alembic
+- Pydantic request and response schemas
+- Email-based password reset flow
+- Docker configuration for development and production deployments
+
+---
+
+## Setup
+
+Clone the repository:
 
 ```bash
-git clone https://github.com/LightQv/scenario-api.git
-cd scenario-api
+git clone https://github.com/LightQv/scenario-fast-api.git
+cd scenario-fast-api
 ```
 
-2. **Copy environment variables**
+Create and activate a virtual environment:
 
 ```bash
-cp .env.example .env
-# Edit .env with your credentials
+python -m venv .venv
+source .venv/bin/activate
 ```
 
-3. **Install dependencies**
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
-source venv/bin/activate
 ```
 
-4. **Database**
+Create the local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Apply database migrations:
 
 ```bash
 alembic upgrade head
 ```
 
-## 🐳 Docker
+---
 
-- `Dockerfile` / `Dockerfile.dev`
-- `docker-compose.dev.yaml` / `docker-compose.prod.yaml`
-- `nginx/` for configuration
+## Development
 
-## 🗄️ Database Management
+Run the API server:
 
-Restore from SQL dump:
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Run tests:
+
+```bash
+pytest
+```
+
+Run tests with coverage:
+
+```bash
+pytest --cov
+```
+
+Run linting:
+
+```bash
+pylint app/
+```
+
+Run with Docker:
+
+```bash
+docker-compose -f docker-compose.yaml up
+```
+
+Run the production Docker stack:
+
+```bash
+docker-compose -f docker-compose.prod.yaml up
+```
+
+---
+
+## Database
+
+Create a migration after changing SQLAlchemy models:
+
+```bash
+alembic revision --autogenerate -m "migration message"
+```
+
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Rollback the latest migration:
+
+```bash
+alembic downgrade -1
+```
+
+Restore data from a SQL dump:
 
 ```bash
 python app/database/restore_data.py
 ```
 
-⚠️ Warning: This will erase current database content.
+The restore script replaces the current database content.
 
-## 📚 API Documentation
+---
 
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+## Configuration
 
-## 🔧 Useful Commands
+Configuration is loaded from environment variables.
 
-### Database Migrations (Alembic)
+Required groups:
 
-```bash
-# Create a new migration after changing models
-alembic revision --autogenerate -m "your migration message"
+- `DATABASE_URL` and PostgreSQL connection settings
+- `JWT_SECRET_KEY` and token expiration settings
+- `FRONTEND_URL` for CORS
+- SMTP settings for password reset emails
+- Optional monitoring settings for production deployments
 
-# Apply migrations to the database
-alembic upgrade head
+See `.env.example` for the expected local configuration shape.
 
-# Downgrade to a previous migration (optional)
-alembic downgrade -1
+---
+
+## API Documentation
+
+When the development server is running, API documentation is available at:
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- Health check: `http://localhost:8000/health`
+
+---
+
+## Project Structure
+
+```text
+app/
+├── api/          # Versioned API routes and dependencies
+├── core/         # Settings, security, middleware, logging, email configuration
+├── database/     # SQLAlchemy session, Alembic migrations, restore tools
+├── models/       # SQLAlchemy ORM models
+├── schemas/      # Pydantic schemas
+├── services/     # Reusable service layer
+└── utils/        # Shared utility code
 ```
 
-## 🔍 Monitoring & Security
+---
 
-- Logging with **Loguru**
-- Error tracking with **Sentry**
-- Nginx metrics & rate limiting
-- JWT auth, bcrypt passwords, secure reset tokens
-- Security headers: `Strict-Transport-Security`, `X-Frame-Options`, `CSP`, etc.
+## Related Projects
 
-## 📄 License
+- [Scenario Web](https://github.com/LightQv/scenario-web-client)
+- [Scenario Expo](https://github.com/LightQv/scenario-expo)
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+---
+
+## License
+
+Scenario API is licensed under the MIT License. See [LICENSE](LICENSE).
