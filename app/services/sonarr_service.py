@@ -321,6 +321,55 @@ class SonarrService:
             return
         self._request("DELETE", f"/series/{sonarr_series_id}", params={"deleteFiles": "false"})
 
+    def delete_series_files(self, sonarr_series_id: int) -> None:
+        """Delete a Sonarr series and its imported files."""
+        self._request("DELETE", f"/series/{sonarr_series_id}", params={"deleteFiles": "true"})
+
+    def delete_season_files(self, sonarr_series_id: int, season_number: int) -> int:
+        """Delete imported files for one season and stop monitoring that season.
+
+        Args:
+            sonarr_series_id: Sonarr series identifier.
+            season_number: Season number to delete.
+
+        Returns:
+            Number of episode files requested for deletion.
+        """
+        episodes = self.get_episodes(sonarr_series_id)
+        deleted_count = 0
+
+        for episode in episodes:
+            if _safe_int(episode.get("seasonNumber")) != season_number:
+                continue
+            episode_file_id = _safe_int(episode.get("episodeFileId"))
+            if episode_file_id is None or episode_file_id <= 0:
+                continue
+            self._request("DELETE", f"/episodeFile/{episode_file_id}")
+            deleted_count += 1
+
+        self._unmonitor_season(sonarr_series_id, season_number)
+        return deleted_count
+
+    def _unmonitor_season(self, sonarr_series_id: int, season_number: int) -> None:
+        """Set one Sonarr season to unmonitored without touching other seasons."""
+        series = self._request("GET", f"/series/{sonarr_series_id}")
+        if not isinstance(series, dict):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected Sonarr series response",
+            )
+
+        changed = False
+        for season in series.get("seasons") or []:
+            if _safe_int(season.get("seasonNumber")) == season_number:
+                if season.get("monitored") is not False:
+                    season["monitored"] = False
+                    changed = True
+                break
+
+        if changed:
+            self._request("PUT", f"/series/{sonarr_series_id}", json=series)
+
     @staticmethod
     def extract_command_id(command: dict[str, Any] | None) -> int | None:
         """Extract a Sonarr command ID from a command response."""

@@ -225,6 +225,40 @@ class RadarrService:
                 detail="Unable to remove Radarr movie",
             ) from error
 
+    def delete_movie_by_tmdb_id(
+        self,
+        tmdb_id: int,
+        delete_files: bool = True,
+        add_exclusion: bool = False,
+    ) -> bool:
+        """Delete a Radarr movie by TMDB ID.
+
+        Args:
+            tmdb_id: TMDB movie identifier.
+            delete_files: Whether Radarr should delete the imported movie file.
+            add_exclusion: Whether Radarr should prevent future re-adds.
+
+        Returns:
+            True when a Radarr movie was found and deleted, otherwise False.
+        """
+        movie = self.get_movie_by_tmdb_id(tmdb_id)
+        radarr_movie_id = movie.get("id") if movie else None
+        if radarr_movie_id is None:
+            return False
+
+        try:
+            self._client().movie.delete(
+                int(radarr_movie_id),
+                delete_files=delete_files,
+                add_exclusion=add_exclusion,
+            )
+            return True
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to delete Radarr movie",
+            ) from error
+
     def get_command(self, command_id: int) -> dict[str, Any] | None:
         """Return a Radarr command by ID, or None when Radarr no longer exposes it."""
         try:

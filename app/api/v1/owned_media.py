@@ -15,6 +15,7 @@ from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.models import User
 from app.schemas import (
+    OwnedMediaDeleteResponse,
     OwnedMediaResponse,
     OwnedMediaStatusResponse,
     OwnedMediaSyncStatusResponse,
@@ -27,8 +28,12 @@ from app.schemas import (
 )
 from app.services.owned_media_service import (
     SyncAlreadyRunningError,
+    delete_radarr_owned_movie_from_server,
+    delete_sonarr_owned_season_from_server,
+    delete_sonarr_owned_show_from_server,
     get_owned_media,
     get_radarr_owned_movies_sync_status,
+    get_owned_tv_availability_statuses,
     get_owned_media_sync_status,
     get_owned_media_status,
     get_tv_availability_status,
@@ -154,6 +159,87 @@ def _run_sonarr_owned_media_sync_background(user_id) -> None:
         database_session.close()
 
 
+@router.delete(
+    "/movie/{tmdb_id}",
+    response_model=OwnedMediaDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete owned movie from Radarr",
+    description="Delete a movie and its file from Radarr, then remove Scenario's local owned cache row.",
+)
+def delete_owned_movie(
+    tmdb_id: int,
+    user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> OwnedMediaDeleteResponse:
+    """Delete one owned movie from the configured Radarr server."""
+    runtime_config = get_enabled_radarr_config(database_session, user.id)
+    radarr_service = RadarrService(
+        url=runtime_config.config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=runtime_config.config.get("root_folder_path"),
+        quality_profile_id=runtime_config.config.get("quality_profile_id"),
+    )
+    return delete_radarr_owned_movie_from_server(database_session, tmdb_id, radarr_service)
+
+
+@router.delete(
+    "/tv/{tmdb_id}/server",
+    response_model=OwnedMediaDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete owned TV from Sonarr",
+    description="Delete a whole show or one season from Sonarr, then remove Scenario's local owned cache rows.",
+)
+def delete_owned_tv(
+    tmdb_id: int,
+    scope: str = Query(..., description="TV deletion scope: show or season"),
+    season_number: int | None = Query(None, description="Season number when scope is season"),
+    user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> OwnedMediaDeleteResponse:
+    """Delete owned TV content from the configured Sonarr server."""
+    if scope not in {"show", "season"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="scope must be show or season",
+        )
+    if scope == "season" and season_number is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="season_number is required for season deletion",
+        )
+
+    sonarr_service = _sonarr_service_for_user(database_session, user.id)
+    if scope == "show":
+        return delete_sonarr_owned_show_from_server(database_session, tmdb_id, sonarr_service)
+    return delete_sonarr_owned_season_from_server(
+        database_session,
+        tmdb_id,
+        season_number or 0,
+        sonarr_service,
+    )
+
+
+def _sonarr_service_for_user(database_session: Session, user_id) -> SonarrService:
+    """Build a configured Sonarr service for the current user."""
+    runtime_config = get_enabled_sonarr_config(database_session, user_id)
+    profiles = runtime_config.config.get("profiles") if isinstance(runtime_config.config.get("profiles"), dict) else {}
+    tv_on_air_profile = profiles.get("tv_on_air") or {}
+    tv_complete_profile = profiles.get("tv_complete") or {}
+    anime_profile = profiles.get("anime") or {}
+    return SonarrService(
+        url=runtime_config.config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=tv_on_air_profile.get("root_folder_path") or tv_complete_profile.get("root_folder_path"),
+        anime_root_folder_path=anime_profile.get("root_folder_path"),
+        quality_profile_id=tv_on_air_profile.get("quality_profile_id") or tv_complete_profile.get("quality_profile_id"),
+        on_air_quality_profile_id=tv_on_air_profile.get("quality_profile_id"),
+        complete_quality_profile_id=tv_complete_profile.get("quality_profile_id"),
+        anime_quality_profile_id=anime_profile.get("quality_profile_id"),
+        language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
+        anime_language_profile_id=anime_profile.get("language_profile_id"),
+    )
+
+
 @router.post(
     "/webhooks/radarr",
     response_model=RadarrWebhookResponse,
@@ -265,6 +351,20 @@ def owned_media_status(
     availability from locally synced owned episodes.
     """
     return get_owned_media_status(tmdb_id, media_type, database_session)
+
+
+@router.get(
+    "/tv/statuses",
+    response_model=list[TvAvailabilityResponse],
+    summary="Get all owned TV availability statuses",
+    description="Return exact TV availability for all locally synced Sonarr shows.",
+)
+def tv_availability_statuses(
+    _: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> list[TvAvailabilityResponse]:
+    """Return exact TV availability for all owned TV shows."""
+    return get_owned_tv_availability_statuses(database_session)
 
 
 @router.get(
