@@ -107,14 +107,14 @@ def request_sonarr_season(
     response_model=list[DownloadRequestResponse],
     status_code=status.HTTP_200_OK,
     summary="List download requests",
-    description="Return all household download requests.",
+    description="Return the current user's download requests.",
 )
 def list_requests(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> list[DownloadRequestResponse]:
-    """List all household download requests."""
-    return list_download_requests(database_session)
+    """List all download requests for the current user."""
+    return list_download_requests(database_session, user.id)
 
 
 @router.delete(
@@ -125,11 +125,11 @@ def list_requests(
     description="Remove local history rows for available, failed, not-found, and cancelled requests.",
 )
 def clean_requests(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> dict[str, int]:
-    """Clean non-active household download request history."""
-    return {"deleted_count": clean_download_requests(database_session)}
+    """Clean non-active download request history for the current user."""
+    return {"deleted_count": clean_download_requests(database_session, user.id)}
 
 
 @router.post(
@@ -137,14 +137,14 @@ def clean_requests(
     response_model=dict[str, int],
     status_code=status.HTTP_200_OK,
     summary="Cancel all active download requests",
-    description="Cancel all active household download requests and remove matching integration queue state.",
+    description="Cancel the current user's active download requests and remove matching integration queue state.",
 )
 def cancel_all_requests(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> dict[str, int]:
-    """Cancel all cancellable household download requests."""
-    return {"cancelled_count": cancel_all_download_requests(database_session)}
+    """Cancel all cancellable download requests for the current user."""
+    return {"cancelled_count": cancel_all_download_requests(database_session, user.id)}
 
 
 @router.post(
@@ -156,11 +156,11 @@ def cancel_all_requests(
 )
 def retry_request(
     request_id: UUID,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse:
-    """Retry one household download request."""
-    return retry_download_request(request_id, database_session)
+    """Retry one download request owned by the current user."""
+    return retry_download_request(request_id, user.id, database_session)
 
 
 @router.post(
@@ -172,11 +172,11 @@ def retry_request(
 )
 def cancel_request(
     request_id: UUID,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse:
-    """Cancel one household download request."""
-    return cancel_download_request(request_id, database_session)
+    """Cancel one download request owned by the current user."""
+    return cancel_download_request(request_id, user.id, database_session)
 
 
 @router.get(
@@ -184,7 +184,7 @@ def cancel_request(
     response_model=DownloadRequestResponse | None,
     status_code=status.HTTP_200_OK,
     summary="Get download request status",
-    description="Return the latest household download request for a media item.",
+    description="Return the current user's latest download request for a media item.",
 )
 def request_status(
     tmdb_id: int = Query(..., description="TMDB media identifier"),
@@ -192,13 +192,14 @@ def request_status(
     scope: str | None = Query(None, description="Request scope for TV"),
     season_number: int | None = Query(None, description="Season number for season scope"),
     episode_number: int | None = Query(None, description="Episode number for episode scope"),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse | None:
     """Return download request status for one media item."""
     return get_download_request_status(
         tmdb_id,
         media_type,
+        user.id,
         database_session,
         scope,
         season_number,

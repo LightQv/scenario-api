@@ -7,7 +7,7 @@ without mixing sync metadata into owned media availability rows.
 
 import uuid
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.database.base import Base
@@ -32,14 +32,21 @@ class IntegrationSyncStatus(Base):
     __tablename__ = "integration_sync_status"
     __table_args__ = (
         UniqueConstraint(
+            "user_id",
             "source",
             "media_type",
-            name="uq_integration_sync_status_source_media_type",
+            name="uq_integration_sync_status_user_source_media_type",
         ),
-        Index("idx_integration_sync_status_source_media_type", "source", "media_type"),
+        Index("idx_integration_sync_status_user_source_media_type", "user_id", "source", "media_type"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_model.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     source = Column(String(50), nullable=False)
     media_type = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False, default="idle")

@@ -1,8 +1,8 @@
 """
 Owned media background scheduler.
 
-This module runs Radarr-owned movie syncs at fixed local clock hours so syncs do
-not drift based on container startup time.
+This module runs per-user Radarr/Sonarr owned media syncs at fixed local clock
+hours so syncs do not drift based on container startup time.
 """
 
 import asyncio
@@ -14,9 +14,18 @@ from app.core.logger import log
 from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.services.owned_media_service import (
+    RADARR_SOURCE,
     SYNC_TRIGGER_SCHEDULED,
+    SONARR_SOURCE,
     SyncAlreadyRunningError,
     sync_radarr_owned_movies,
+    sync_sonarr_owned_tv,
+)
+from app.services.radarr_service import RadarrService
+from app.services.sonarr_service import SonarrService
+from app.services.user_integration_settings_service import (
+    IntegrationRuntimeConfig,
+    get_enabled_runtime_configs,
 )
 
 
@@ -36,9 +45,6 @@ class OwnedMediaScheduler:
         """
         Start the background scheduler task if enabled.
         """
-        log.info("Owned media auto-sync scheduler is disabled for per-user integrations")
-        return
-
         if not settings.OWNED_MEDIA_AUTO_SYNC_ENABLED:
             log.info("Owned media auto-sync scheduler is disabled")
             return
@@ -88,11 +94,45 @@ class OwnedMediaScheduler:
 
     def _sync_once(self) -> None:
         """
-        Execute one Radarr sync with an isolated database session.
+        Execute one per-user integration sync batch with an isolated database session.
         """
         database_session = SessionLocal()
         try:
-            sync_radarr_owned_movies(database_session, trigger=SYNC_TRIGGER_SCHEDULED)
+            for user_id, runtime_config in get_enabled_runtime_configs(database_session, RADARR_SOURCE):
+                try:
+                    sync_radarr_owned_movies(
+                        database_session,
+                        user_id,
+                        trigger=SYNC_TRIGGER_SCHEDULED,
+                        radarr_service=_radarr_service_from_runtime_config(runtime_config),
+                    )
+                except SyncAlreadyRunningError:
+                    database_session.rollback()
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    database_session.rollback()
+                    log.exception(
+                        "Scheduled Radarr owned media sync failed: user_id={} error={}",
+                        user_id,
+                        error,
+                    )
+
+            for user_id, runtime_config in get_enabled_runtime_configs(database_session, SONARR_SOURCE):
+                try:
+                    sync_sonarr_owned_tv(
+                        database_session,
+                        user_id,
+                        trigger=SYNC_TRIGGER_SCHEDULED,
+                        sonarr_service=_sonarr_service_from_runtime_config(runtime_config),
+                    )
+                except SyncAlreadyRunningError:
+                    database_session.rollback()
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    database_session.rollback()
+                    log.exception(
+                        "Scheduled Sonarr owned media sync failed: user_id={} error={}",
+                        user_id,
+                        error,
+                    )
         except SyncAlreadyRunningError:
             database_session.rollback()
         except Exception:  # pylint: disable=broad-exception-caught
@@ -157,6 +197,38 @@ class OwnedMediaScheduler:
                 return candidate
 
         return today_start + timedelta(days=1, hours=sync_hours[0])
+
+
+def _radarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig) -> RadarrService:
+    """Build a Radarr service from decrypted per-user settings."""
+    config = runtime_config.config
+    return RadarrService(
+        url=config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=config.get("root_folder_path"),
+        quality_profile_id=config.get("quality_profile_id"),
+    )
+
+
+def _sonarr_service_from_runtime_config(runtime_config: IntegrationRuntimeConfig) -> SonarrService:
+    """Build a Sonarr service from decrypted per-user settings."""
+    config = runtime_config.config
+    profiles = config.get("profiles") if isinstance(config.get("profiles"), dict) else {}
+    tv_on_air_profile = profiles.get("tv_on_air") or {}
+    tv_complete_profile = profiles.get("tv_complete") or {}
+    anime_profile = profiles.get("anime") or {}
+    return SonarrService(
+        url=config.get("url"),
+        api_key=runtime_config.api_key,
+        root_folder_path=tv_on_air_profile.get("root_folder_path") or tv_complete_profile.get("root_folder_path"),
+        anime_root_folder_path=anime_profile.get("root_folder_path"),
+        quality_profile_id=tv_on_air_profile.get("quality_profile_id") or tv_complete_profile.get("quality_profile_id"),
+        on_air_quality_profile_id=tv_on_air_profile.get("quality_profile_id"),
+        complete_quality_profile_id=tv_complete_profile.get("quality_profile_id"),
+        anime_quality_profile_id=anime_profile.get("quality_profile_id"),
+        language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
+        anime_language_profile_id=anime_profile.get("language_profile_id"),
+    )
 
 
 owned_media_scheduler = OwnedMediaScheduler()

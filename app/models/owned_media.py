@@ -7,7 +7,7 @@ on the home server, as reported by integrations such as Radarr and Sonarr.
 
 import uuid
 
-from sqlalchemy import ARRAY, Column, DateTime, Index, Integer, String, text
+from sqlalchemy import ARRAY, Column, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.database.base import Base
@@ -37,6 +37,7 @@ class OwnedMedia(Base):
     __table_args__ = (
         Index(
             "uq_owned_media_movie_tmdb_type_source",
+            "user_id",
             "tmdb_id",
             "media_type",
             "source",
@@ -45,6 +46,7 @@ class OwnedMedia(Base):
         ),
         Index(
             "uq_owned_media_episode_tmdb_type_source_season_episode",
+            "user_id",
             "tmdb_id",
             "media_type",
             "source",
@@ -53,12 +55,18 @@ class OwnedMedia(Base):
             unique=True,
             postgresql_where=text("scope = 'episode'"),
         ),
-        Index("idx_owned_media_tmdb_type", "tmdb_id", "media_type"),
-        Index("idx_owned_media_tmdb_type_source", "tmdb_id", "media_type", "source"),
-        Index("idx_owned_media_tv_episode", "tmdb_id", "season_number", "episode_number"),
+        Index("idx_owned_media_user_tmdb_type", "user_id", "tmdb_id", "media_type"),
+        Index("idx_owned_media_user_tmdb_type_source", "user_id", "tmdb_id", "media_type", "source"),
+        Index("idx_owned_media_user_tv_episode", "user_id", "tmdb_id", "season_number", "episode_number"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_model.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     tmdb_id = Column(Integer, nullable=False)
     media_type = Column(String(50), nullable=False)
     scope = Column(String(50), nullable=False, default="movie")

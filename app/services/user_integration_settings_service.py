@@ -1,6 +1,7 @@
 """Per-user Radarr/Sonarr integration settings service."""
 
 from dataclasses import dataclass
+from secrets import compare_digest
 from typing import Any
 from uuid import UUID
 
@@ -215,6 +216,55 @@ def get_enabled_sonarr_connection_config(
             detail="Sonarr URL and API key are required",
         )
     return _runtime_config(row)
+
+
+def get_enabled_runtime_configs(
+    database_session: Session,
+    source: str,
+) -> list[tuple[UUID, IntegrationRuntimeConfig]]:
+    """Return decrypted runtime configs for all enabled/configured users of a source."""
+    rows = (
+        database_session.query(UserIntegrationSettings)
+        .filter(
+            UserIntegrationSettings.source == source,
+            UserIntegrationSettings.enabled.is_(True),
+        )
+        .all()
+    )
+    configured = _radarr_configured if source == RADARR_SOURCE else _sonarr_configured
+    runtime_configs: list[tuple[UUID, IntegrationRuntimeConfig]] = []
+    for row in rows:
+        if configured(row):
+            runtime_configs.append((row.user_id, _runtime_config(row)))
+    return runtime_configs
+
+
+def get_user_id_for_webhook_token(
+    database_session: Session,
+    source: str,
+    token: str,
+) -> UUID | None:
+    """Return the user owning a matching enabled integration webhook token."""
+    # NOTE: This returns the first matching per-user token. Before expanding
+    # beyond trusted shared configs, add deterministic hashing and uniqueness
+    # enforcement for webhook secrets per source.
+    if not token:
+        return None
+    rows = (
+        database_session.query(UserIntegrationSettings)
+        .filter(
+            UserIntegrationSettings.source == source,
+            UserIntegrationSettings.enabled.is_(True),
+        )
+        .all()
+    )
+    cipher = IntegrationSecretCipher()
+    for row in rows:
+        secrets = row.encrypted_secrets or {}
+        webhook_secret = cipher.decrypt(secrets.get(SECRET_WEBHOOK_SECRET))
+        if webhook_secret and compare_digest(token, webhook_secret):
+            return row.user_id
+    return None
 
 
 def get_radarr_options(database_session: Session, user_id: UUID) -> RadarrOptionsResponse:

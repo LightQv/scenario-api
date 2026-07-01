@@ -47,6 +47,7 @@ class SonarrWebhookResponse(BaseModel):
 
 class OwnedMediaResponse(BaseModel):
     id: UUID
+    user_id: UUID
     tmdb_id: int
     genre_ids: list[int]
     poster_path: str
@@ -95,6 +96,7 @@ class OwnedMediaSyncResponse(BaseModel):
 
 
 class OwnedMediaSyncStatusResponse(BaseModel):
+    user_id: UUID
     source: str
     media_type: str
     status: str

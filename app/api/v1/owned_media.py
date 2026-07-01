@@ -5,13 +5,12 @@ These routes expose Scenario's local owned media state and a manual Radarr sync
 action. Read endpoints never call Radarr/Sonarr in real time.
 """
 
-from secrets import compare_digest
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_database
-from app.core.settings import settings
 from app.database.session import SessionLocal
 from app.models import User
 from app.schemas import (
@@ -48,8 +47,11 @@ from app.services.owned_media_service import (
 from app.services.radarr_service import RadarrService
 from app.services.sonarr_service import SonarrService
 from app.services.user_integration_settings_service import (
+    RADARR_SOURCE,
+    SONARR_SOURCE,
     get_enabled_radarr_config,
     get_enabled_sonarr_config,
+    get_user_id_for_webhook_token,
 )
 
 router = APIRouter(
@@ -82,7 +84,7 @@ def sync_radarr_owned_media(
     """
     try:
         get_enabled_radarr_config(database_session, user.id)
-        sync_status = start_radarr_owned_movies_sync(database_session)
+        sync_status = start_radarr_owned_movies_sync(database_session, user.id)
         background_tasks.add_task(_run_radarr_owned_media_sync_background, user.id)
         return sync_status
     except SyncAlreadyRunningError as error:
@@ -92,7 +94,7 @@ def sync_radarr_owned_media(
         ) from error
 
 
-def _run_radarr_owned_media_sync_background(user_id) -> None:
+def _run_radarr_owned_media_sync_background(user_id: UUID) -> None:
     """Run queued Radarr owned movie sync with a fresh DB session."""
     database_session = SessionLocal()
     try:
@@ -103,7 +105,7 @@ def _run_radarr_owned_media_sync_background(user_id) -> None:
             root_folder_path=runtime_config.config.get("root_folder_path"),
             quality_profile_id=runtime_config.config.get("quality_profile_id"),
         )
-        sync_radarr_owned_movies_with_reserved_lock(database_session, radarr_service=radarr_service)
+        sync_radarr_owned_movies_with_reserved_lock(database_session, user_id, radarr_service=radarr_service)
     finally:
         database_session.close()
 
@@ -123,7 +125,7 @@ def sync_sonarr_owned_media(
     """Manually sync Scenario's owned TV episodes from Sonarr."""
     try:
         get_enabled_sonarr_config(database_session, user.id)
-        sync_status = start_sonarr_owned_tv_sync(database_session)
+        sync_status = start_sonarr_owned_tv_sync(database_session, user.id)
         background_tasks.add_task(_run_sonarr_owned_media_sync_background, user.id)
         return sync_status
     except SyncAlreadyRunningError as error:
@@ -133,7 +135,7 @@ def sync_sonarr_owned_media(
         ) from error
 
 
-def _run_sonarr_owned_media_sync_background(user_id) -> None:
+def _run_sonarr_owned_media_sync_background(user_id: UUID) -> None:
     """Run queued Sonarr owned TV sync with a fresh DB session."""
     database_session = SessionLocal()
     try:
@@ -154,7 +156,7 @@ def _run_sonarr_owned_media_sync_background(user_id) -> None:
             language_profile_id=tv_on_air_profile.get("language_profile_id") or tv_complete_profile.get("language_profile_id"),
             anime_language_profile_id=anime_profile.get("language_profile_id"),
         )
-        sync_sonarr_owned_tv_with_reserved_lock(database_session, sonarr_service=sonarr_service)
+        sync_sonarr_owned_tv_with_reserved_lock(database_session, user_id, sonarr_service=sonarr_service)
     finally:
         database_session.close()
 
@@ -179,7 +181,7 @@ def delete_owned_movie(
         root_folder_path=runtime_config.config.get("root_folder_path"),
         quality_profile_id=runtime_config.config.get("quality_profile_id"),
     )
-    return delete_radarr_owned_movie_from_server(database_session, tmdb_id, radarr_service)
+    return delete_radarr_owned_movie_from_server(database_session, user.id, tmdb_id, radarr_service)
 
 
 @router.delete(
@@ -210,9 +212,10 @@ def delete_owned_tv(
 
     sonarr_service = _sonarr_service_for_user(database_session, user.id)
     if scope == "show":
-        return delete_sonarr_owned_show_from_server(database_session, tmdb_id, sonarr_service)
+        return delete_sonarr_owned_show_from_server(database_session, user.id, tmdb_id, sonarr_service)
     return delete_sonarr_owned_season_from_server(
         database_session,
+        user.id,
         tmdb_id,
         season_number or 0,
         sonarr_service,
@@ -260,13 +263,14 @@ def radarr_owned_media_webhook(
     or removed. The shared token protects the endpoint from unauthenticated
     public writes while keeping Radarr configuration simple.
     """
-    if not compare_digest(token, settings.RADARR_WEBHOOK_SECRET):
+    user_id = get_user_id_for_webhook_token(database_session, RADARR_SOURCE, token)
+    if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid webhook token",
         )
 
-    return handle_radarr_webhook(payload, database_session)
+    return handle_radarr_webhook(payload, user_id, database_session)
 
 
 @router.post(
@@ -283,13 +287,14 @@ def sonarr_owned_media_webhook(
     database_session: Session = Depends(get_database),
 ) -> SonarrWebhookResponse:
     """Handle Sonarr webhook events without Scenario user authentication."""
-    if not compare_digest(token, settings.SONARR_WEBHOOK_SECRET):
+    user_id = get_user_id_for_webhook_token(database_session, SONARR_SOURCE, token)
+    if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid webhook token",
         )
 
-    return handle_sonarr_webhook(payload, database_session)
+    return handle_sonarr_webhook(payload, user_id, database_session)
 
 
 @router.get(
@@ -302,15 +307,15 @@ def sonarr_owned_media_webhook(
 def radarr_owned_media_sync_status(
     source: str = Query("RADARR", description="Integration source"),
     media_type: str = Query("movie", description="Synced media type"),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """
     Return Radarr movie sync state for profile/admin UI controls.
     """
     if source == "RADARR" and media_type == "movie":
-        return get_radarr_owned_movies_sync_status(database_session)
-    return get_owned_media_sync_status(database_session, source, media_type)
+        return get_radarr_owned_movies_sync_status(database_session, user.id)
+    return get_owned_media_sync_status(database_session, user.id, source, media_type)
 
 
 @router.get(
@@ -320,7 +325,7 @@ def radarr_owned_media_sync_status(
     description="Return all owned media rows stored in Scenario's database.",
 )
 def list_owned_media(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> list[OwnedMediaResponse]:
     """
@@ -329,7 +334,7 @@ def list_owned_media(
     This endpoint does not call Radarr or Sonarr. It is safe for the mobile app
     to use for app-wide owned media state.
     """
-    return get_owned_media(database_session)
+    return get_owned_media(database_session, user.id)
 
 
 @router.get(
@@ -341,7 +346,7 @@ def list_owned_media(
 def owned_media_status(
     tmdb_id: int = Query(..., description="TMDB media identifier"),
     media_type: str = Query(..., description="Media type, e.g. movie or tv"),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaStatusResponse:
     """
@@ -350,7 +355,7 @@ def owned_media_status(
     Movies return a direct Radarr-owned boolean. TV shows return derived Sonarr
     availability from locally synced owned episodes.
     """
-    return get_owned_media_status(tmdb_id, media_type, database_session)
+    return get_owned_media_status(tmdb_id, media_type, database_session, user.id)
 
 
 @router.get(
@@ -360,11 +365,11 @@ def owned_media_status(
     description="Return exact TV availability for all locally synced Sonarr shows.",
 )
 def tv_availability_statuses(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> list[TvAvailabilityResponse]:
     """Return exact TV availability for all owned TV shows."""
-    return get_owned_tv_availability_statuses(database_session)
+    return get_owned_tv_availability_statuses(database_session, user.id)
 
 
 @router.get(
@@ -375,11 +380,11 @@ def tv_availability_statuses(
 )
 def tv_availability_status(
     tmdb_id: int = Query(..., description="TMDB TV series identifier"),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> TvAvailabilityResponse:
     """Return TV series availability using local ownership and TMDB episode data."""
-    return get_tv_availability_status(tmdb_id, database_session)
+    return get_tv_availability_status(tmdb_id, database_session, user.id)
 
 
 @router.get(
@@ -391,8 +396,8 @@ def tv_availability_status(
 def tv_season_availability_status(
     tmdb_id: int = Query(..., description="TMDB TV series identifier"),
     season_number: int = Query(..., ge=1, description="Regular season number"),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> TvSeasonAvailabilityResponse:
     """Return TV season availability using local ownership and TMDB episode data."""
-    return get_tv_season_availability_status(tmdb_id, season_number, database_session)
+    return get_tv_season_availability_status(tmdb_id, season_number, database_session, user.id)

@@ -76,12 +76,13 @@ def request_radarr_movie_download(
     existing_request = get_download_request_for_media(
         tmdb_id,
         MOVIE_MEDIA_TYPE,
+        user.id,
         database_session,
     )
     if existing_request and existing_request.status in ACTIVE_DOWNLOAD_STATUSES:
         return DownloadRequestResponse.model_validate(existing_request)
 
-    if _is_owned_movie(tmdb_id, database_session):
+    if _is_owned_movie(tmdb_id, user.id, database_session):
         download_request = existing_request or _create_download_request(
             tmdb_id,
             user,
@@ -193,10 +194,11 @@ def request_sonarr_season_download(
 
 def retry_download_request(
     request_id: UUID,
+    user_id: UUID,
     database_session: Session,
 ) -> DownloadRequestResponse:
     """Retry a failed, not-found, or cancelled Radarr movie request."""
-    download_request = _get_download_request_or_404(request_id, database_session)
+    download_request = _get_download_request_or_404(request_id, user_id, database_session)
     if download_request.status not in RETRYABLE_DOWNLOAD_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -237,10 +239,11 @@ def retry_download_request(
 
 def cancel_download_request(
     request_id: UUID,
+    user_id: UUID,
     database_session: Session,
 ) -> DownloadRequestResponse:
     """Cancel a local request and remove its active Radarr queue/movie state."""
-    download_request = _get_download_request_or_404(request_id, database_session)
+    download_request = _get_download_request_or_404(request_id, user_id, database_session)
     if download_request.source == SONARR_SOURCE:
         return _cancel_sonarr_request(download_request, database_session)
 
@@ -273,30 +276,36 @@ def cancel_download_request(
     return DownloadRequestResponse.model_validate(download_request)
 
 
-def clean_download_requests(database_session: Session) -> int:
+def clean_download_requests(database_session: Session, user_id: UUID) -> int:
     """Remove terminal local download request history rows."""
     deleted_count = (
         database_session.query(DownloadRequest)
-        .filter(DownloadRequest.status.in_(TERMINAL_DOWNLOAD_STATUSES))
+        .filter(
+            DownloadRequest.user_id == user_id,
+            DownloadRequest.status.in_(TERMINAL_DOWNLOAD_STATUSES),
+        )
         .delete(synchronize_session=False)
     )
     database_session.commit()
     return int(deleted_count)
 
 
-def cancel_all_download_requests(database_session: Session) -> int:
+def cancel_all_download_requests(database_session: Session, user_id: UUID) -> int:
     """Cancel all active download requests that can be cancelled."""
     request_ids = [
         request_id
         for (request_id,) in database_session.query(DownloadRequest.id)
-        .filter(DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES))
+        .filter(
+            DownloadRequest.user_id == user_id,
+            DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
+        )
         .all()
     ]
 
     cancelled_count = 0
     for request_id in request_ids:
         try:
-            cancel_download_request(request_id, database_session)
+            cancel_download_request(request_id, user_id, database_session)
             cancelled_count += 1
         except HTTPException:
             continue
@@ -304,11 +313,12 @@ def cancel_all_download_requests(database_session: Session) -> int:
     return cancelled_count
 
 
-def list_download_requests(database_session: Session) -> list[DownloadRequestResponse]:
-    """Return all household download requests, newest first."""
-    reconcile_download_requests(database_session)
+def list_download_requests(database_session: Session, user_id: UUID) -> list[DownloadRequestResponse]:
+    """Return all download requests for one user, newest first."""
+    reconcile_download_requests(database_session, user_id)
     requests = (
         database_session.query(DownloadRequest)
+        .filter(DownloadRequest.user_id == user_id)
         .order_by(DownloadRequest.requested_at.desc())
         .all()
     )
@@ -318,25 +328,27 @@ def list_download_requests(database_session: Session) -> list[DownloadRequestRes
 def get_download_request_status(
     tmdb_id: int,
     media_type: str,
+    user_id: UUID,
     database_session: Session,
     scope: str | None = None,
     season_number: int | None = None,
     episode_number: int | None = None,
 ) -> DownloadRequestResponse | None:
     """Return the latest download request for a media item, if any."""
-    reconcile_download_requests(database_session)
+    reconcile_download_requests(database_session, user_id)
     if source := (SONARR_SOURCE if media_type == TV_MEDIA_TYPE else None):
         download_request = get_download_request_for_scope(
             tmdb_id,
             media_type,
             source,
             scope or SCOPE_SERIES,
+            user_id,
             database_session,
             season_number,
             episode_number,
         )
     else:
-        download_request = get_download_request_for_media(tmdb_id, media_type, database_session)
+        download_request = get_download_request_for_media(tmdb_id, media_type, user_id, database_session)
     if not download_request:
         return None
     return DownloadRequestResponse.model_validate(download_request)
@@ -347,6 +359,7 @@ def get_download_request_for_scope(
     media_type: str,
     source: str,
     scope: str,
+    user_id: UUID,
     database_session: Session,
     season_number: int | None = None,
     episode_number: int | None = None,
@@ -357,6 +370,7 @@ def get_download_request_for_scope(
         DownloadRequest.media_type == media_type,
         DownloadRequest.source == source,
         DownloadRequest.scope == scope,
+        DownloadRequest.user_id == user_id,
     )
     if season_number is not None:
         query = query.filter(DownloadRequest.season_number == season_number)
@@ -368,15 +382,17 @@ def get_download_request_for_scope(
 def get_download_request_for_media(
     tmdb_id: int,
     media_type: str,
+    user_id: UUID,
     database_session: Session,
 ) -> DownloadRequest | None:
-    """Return the latest household request for a media item."""
+    """Return the latest user request for a media item."""
     return (
         database_session.query(DownloadRequest)
         .filter(
             DownloadRequest.tmdb_id == tmdb_id,
             DownloadRequest.media_type == media_type,
             DownloadRequest.source == RADARR_SOURCE,
+            DownloadRequest.user_id == user_id,
         )
         .order_by(DownloadRequest.requested_at.desc())
         .first()
@@ -386,17 +402,19 @@ def get_download_request_for_media(
 def mark_radarr_movie_requests_available(
     tmdb_id: int,
     database_session: Session,
+    user_id: UUID | None = None,
 ) -> int:
     """Mark matching Radarr movie requests as available after import webhook."""
+    query = database_session.query(DownloadRequest).filter(
+        DownloadRequest.tmdb_id == tmdb_id,
+        DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
+        DownloadRequest.source == RADARR_SOURCE,
+        DownloadRequest.status != DOWNLOAD_STATUS_AVAILABLE,
+    )
+    if user_id is not None:
+        query = query.filter(DownloadRequest.user_id == user_id)
     updated_count = (
-        database_session.query(DownloadRequest)
-        .filter(
-            DownloadRequest.tmdb_id == tmdb_id,
-            DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
-            DownloadRequest.source == RADARR_SOURCE,
-            DownloadRequest.status != DOWNLOAD_STATUS_AVAILABLE,
-        )
-        .update(
+        query.update(
             {
                 DownloadRequest.status: DOWNLOAD_STATUS_AVAILABLE,
                 DownloadRequest.error_message: None,
@@ -419,18 +437,18 @@ def mark_radarr_movie_request_grabbed(
     tmdb_id: int,
     payload_data: dict,
     database_session: Session,
+    user_id: UUID | None = None,
 ) -> int:
     """Mark matching active requests as downloading after Radarr grabs a release."""
-    download_requests = (
-        database_session.query(DownloadRequest)
-        .filter(
-            DownloadRequest.tmdb_id == tmdb_id,
-            DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
-            DownloadRequest.source == RADARR_SOURCE,
-            DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
-        )
-        .all()
+    query = database_session.query(DownloadRequest).filter(
+        DownloadRequest.tmdb_id == tmdb_id,
+        DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
+        DownloadRequest.source == RADARR_SOURCE,
+        DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
     )
+    if user_id is not None:
+        query = query.filter(DownloadRequest.user_id == user_id)
+    download_requests = query.all()
 
     for download_request in download_requests:
         download_request.status = DOWNLOAD_STATUS_DOWNLOADING
@@ -448,6 +466,7 @@ def mark_sonarr_request_grabbed(
     season_number: int | None,
     payload_data: dict,
     database_session: Session,
+    user_id: UUID | None = None,
 ) -> int:
     """Mark matching active Sonarr requests as downloading after a grab webhook."""
     query = database_session.query(DownloadRequest).filter(
@@ -456,6 +475,8 @@ def mark_sonarr_request_grabbed(
         DownloadRequest.source == SONARR_SOURCE,
         DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
     )
+    if user_id is not None:
+        query = query.filter(DownloadRequest.user_id == user_id)
     download_requests = query.all()
 
     updated_count = 0
@@ -483,18 +504,18 @@ def mark_sonarr_request_grabbed(
 def refresh_sonarr_request_availability(
     tmdb_id: int,
     database_session: Session,
+    user_id: UUID | None = None,
 ) -> int:
     """Mark completed Sonarr requests available when their scope is fully owned."""
-    download_requests = (
-        database_session.query(DownloadRequest)
-        .filter(
-            DownloadRequest.tmdb_id == tmdb_id,
-            DownloadRequest.media_type == TV_MEDIA_TYPE,
-            DownloadRequest.source == SONARR_SOURCE,
-            DownloadRequest.status != DOWNLOAD_STATUS_AVAILABLE,
-        )
-        .all()
+    query = database_session.query(DownloadRequest).filter(
+        DownloadRequest.tmdb_id == tmdb_id,
+        DownloadRequest.media_type == TV_MEDIA_TYPE,
+        DownloadRequest.source == SONARR_SOURCE,
+        DownloadRequest.status != DOWNLOAD_STATUS_AVAILABLE,
     )
+    if user_id is not None:
+        query = query.filter(DownloadRequest.user_id == user_id)
+    download_requests = query.all()
     updated_count = 0
     for download_request in download_requests:
         if _sonarr_request_scope_available(download_request, database_session):
@@ -503,17 +524,18 @@ def refresh_sonarr_request_availability(
     return updated_count
 
 
-def reconcile_download_requests(database_session: Session) -> None:
-    """Refresh active download requests from owned media and Radarr queue."""
-    _reconcile_radarr_download_requests(database_session)
-    _reconcile_sonarr_download_requests(database_session)
+def reconcile_download_requests(database_session: Session, user_id: UUID) -> None:
+    """Refresh active download requests for one user from owned media and integration queues."""
+    _reconcile_radarr_download_requests(database_session, user_id)
+    _reconcile_sonarr_download_requests(database_session, user_id)
 
 
-def _reconcile_radarr_download_requests(database_session: Session) -> None:
-    """Refresh active Radarr movie requests from owned media and queue."""
+def _reconcile_radarr_download_requests(database_session: Session, user_id: UUID) -> None:
+    """Refresh active Radarr movie requests for one user from owned media and queue."""
     active_requests = (
         database_session.query(DownloadRequest)
         .filter(
+            DownloadRequest.user_id == user_id,
             DownloadRequest.media_type == MOVIE_MEDIA_TYPE,
             DownloadRequest.source == RADARR_SOURCE,
             DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
@@ -525,21 +547,22 @@ def _reconcile_radarr_download_requests(database_session: Session) -> None:
 
     pending_requests: list[DownloadRequest] = []
     for download_request in active_requests:
-        if _is_owned_movie(download_request.tmdb_id, database_session):
+        if download_request.user_id is None:
+            continue
+        if _is_owned_movie(download_request.tmdb_id, download_request.user_id, database_session):
             _mark_request_available(download_request)
         else:
             pending_requests.append(download_request)
 
-    if pending_requests:
+    for user_id, user_requests in _group_requests_by_user(pending_requests).items():
         try:
-            runtime_config = get_enabled_radarr_config(database_session, download_request.user_id)
+            runtime_config = get_enabled_radarr_config(database_session, user_id)
             radarr_service = _radarr_service_from_runtime_config(runtime_config)
             queue_records = radarr_service.get_queue()
         except HTTPException:
-            database_session.commit()
-            return
+            continue
         queue_by_tmdb_id, queue_by_radarr_id = _index_queue_records(queue_records)
-        for download_request in pending_requests:
+        for download_request in user_requests:
             queue_record = queue_by_tmdb_id.get(download_request.tmdb_id)
             if not queue_record and download_request.radarr_movie_id is not None:
                 queue_record = queue_by_radarr_id.get(download_request.radarr_movie_id)
@@ -551,11 +574,12 @@ def _reconcile_radarr_download_requests(database_session: Session) -> None:
     database_session.commit()
 
 
-def _reconcile_sonarr_download_requests(database_session: Session) -> None:
-    """Refresh active Sonarr TV requests from owned media and queue."""
+def _reconcile_sonarr_download_requests(database_session: Session, user_id: UUID) -> None:
+    """Refresh active Sonarr TV requests for one user from owned media and queue."""
     active_requests = (
         database_session.query(DownloadRequest)
         .filter(
+            DownloadRequest.user_id == user_id,
             DownloadRequest.media_type == TV_MEDIA_TYPE,
             DownloadRequest.source == SONARR_SOURCE,
             DownloadRequest.status.in_(ACTIVE_DOWNLOAD_STATUSES),
@@ -567,21 +591,22 @@ def _reconcile_sonarr_download_requests(database_session: Session) -> None:
 
     pending_requests: list[DownloadRequest] = []
     for download_request in active_requests:
+        if download_request.user_id is None:
+            continue
         if _sonarr_request_scope_available(download_request, database_session):
             _mark_request_available(download_request)
         else:
             pending_requests.append(download_request)
 
-    if pending_requests:
+    for user_id, user_requests in _group_requests_by_user(pending_requests).items():
         try:
-            runtime_config = get_enabled_sonarr_config(database_session, download_request.user_id)
+            runtime_config = get_enabled_sonarr_config(database_session, user_id)
             sonarr_service = _sonarr_service_from_runtime_config(runtime_config)
             queue_records = sonarr_service.get_queue()
         except HTTPException:
-            database_session.commit()
-            return
+            continue
         episode_maps: dict[int, dict[int, tuple[int | None, int | None]]] = {}
-        for download_request in pending_requests:
+        for download_request in user_requests:
             episode_map = _get_sonarr_episode_map_for_request(
                 sonarr_service,
                 download_request,
@@ -610,6 +635,18 @@ def _reconcile_sonarr_download_requests(database_session: Session) -> None:
                 )
 
     database_session.commit()
+
+
+def _group_requests_by_user(
+    download_requests: list[DownloadRequest],
+) -> dict[UUID, list[DownloadRequest]]:
+    """Group download requests by non-null requester ID."""
+    grouped_requests: dict[UUID, list[DownloadRequest]] = {}
+    for download_request in download_requests:
+        if download_request.user_id is None:
+            continue
+        grouped_requests.setdefault(download_request.user_id, []).append(download_request)
+    return grouped_requests
 
 
 def _create_download_request(
@@ -678,6 +715,7 @@ def _request_sonarr_download(
         TV_MEDIA_TYPE,
         SONARR_SOURCE,
         scope,
+        user.id,
         database_session,
         season_number,
     )
@@ -1220,7 +1258,7 @@ def _sync_sonarr_owned_episodes_for_request(
     """Refresh local owned episodes for one Sonarr series during reconciliation."""
     sonarr_series_id = download_request.sonarr_series_id
     tvdb_id = download_request.tvdb_id
-    if sonarr_series_id is None or tvdb_id is None:
+    if sonarr_series_id is None or tvdb_id is None or download_request.user_id is None:
         return
 
     try:
@@ -1240,6 +1278,7 @@ def _sync_sonarr_owned_episodes_for_request(
             continue
         owned_rows.append(
             OwnedMedia(
+                user_id=download_request.user_id,
                 tmdb_id=download_request.tmdb_id,
                 media_type=TV_MEDIA_TYPE,
                 scope="episode",
@@ -1264,6 +1303,7 @@ def _sync_sonarr_owned_episodes_for_request(
 
     database_session.query(OwnedMedia).filter(
         OwnedMedia.tmdb_id == download_request.tmdb_id,
+        OwnedMedia.user_id == download_request.user_id,
         OwnedMedia.media_type == TV_MEDIA_TYPE,
         OwnedMedia.source == SONARR_SOURCE,
         OwnedMedia.scope == "episode",
@@ -1635,12 +1675,16 @@ def _find_history_record_for_request(
 
 def _get_download_request_or_404(
     request_id: UUID,
+    user_id: UUID,
     database_session: Session,
 ) -> DownloadRequest:
     """Return a download request or raise a 404 HTTP error."""
     download_request = (
         database_session.query(DownloadRequest)
-        .filter(DownloadRequest.id == request_id)
+        .filter(
+            DownloadRequest.id == request_id,
+            DownloadRequest.user_id == user_id,
+        )
         .first()
     )
     if not download_request:
@@ -1687,6 +1731,8 @@ def _sonarr_request_scope_available(
         aired_episodes = _get_aired_tmdb_episodes_for_request(download_request)
     except Exception:
         return False
+    if download_request.user_id is None:
+        return False
     if not aired_episodes:
         return False
 
@@ -1695,6 +1741,7 @@ def _sonarr_request_scope_available(
         for owned in database_session.query(OwnedMedia)
         .filter(
             OwnedMedia.tmdb_id == download_request.tmdb_id,
+            OwnedMedia.user_id == download_request.user_id,
             OwnedMedia.media_type == TV_MEDIA_TYPE,
             OwnedMedia.source == SONARR_SOURCE,
             OwnedMedia.scope == "episode",
@@ -1811,12 +1858,13 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
-def _is_owned_movie(tmdb_id: int, database_session: Session) -> bool:
+def _is_owned_movie(tmdb_id: int, user_id: UUID, database_session: Session) -> bool:
     """Return whether Scenario already marks the movie as owned."""
     return (
         database_session.query(OwnedMedia.id)
         .filter(
             OwnedMedia.tmdb_id == tmdb_id,
+            OwnedMedia.user_id == user_id,
             OwnedMedia.media_type == MOVIE_MEDIA_TYPE,
             OwnedMedia.source == RADARR_SOURCE,
             OwnedMedia.scope == SCOPE_MOVIE,
