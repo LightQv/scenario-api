@@ -26,6 +26,7 @@ from app.schemas.user_settings import (
     SonarrProfileUpsert, SonarrSettingsPatch, SonarrSettingsResponse,
     TestConnectionResponse,
 )
+from app.schemas.badge import BadgeListResponse, BadgeResponse
 
 __all__ = [
     "UserRegister", "UserLogin", "PasswordReset", "ForgottenPassword", "Token",
@@ -46,4 +47,5 @@ __all__ = [
     "SonarrOptionsResponse", "SonarrProfileConfig", "SonarrProfileType",
     "SonarrProfileUpsert", "SonarrSettingsPatch", "SonarrSettingsResponse",
     "TestConnectionResponse",
+    "BadgeListResponse", "BadgeResponse",
 ]
