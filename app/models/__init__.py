@@ -6,6 +6,7 @@ from app.models.owned_media import OwnedMedia
 from app.models.integration_sync_status import IntegrationSyncStatus
 from app.models.download_request import DownloadRequest
 from app.models.user_integration_settings import UserIntegrationSettings
+from app.models.user_badge import UserBadge
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "IntegrationSyncStatus",
     "DownloadRequest",
     "UserIntegrationSettings",
+    "UserBadge",
 ]
