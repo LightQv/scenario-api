@@ -100,7 +100,7 @@ BADGE_DEFINITIONS: tuple[BadgeDefinition, ...] = (
     BadgeDefinition("horror_i", "Horror Hour", "Watch 25 horror media", "horror_items", 25, "skull", "bronze"),
     BadgeDefinition("horror_ii", "Night Watcher", "Watch 75 horror media", "horror_items", 75, "moon", "silver"),
     BadgeDefinition("horror_iii", "Fear Collector", "Watch 150 horror media", "horror_items", 150, "eye", "gold"),
-    BadgeDefinition("horror_iv", "\"We All Go a Little Mad Sometimes\"", "Watch 300 horror media", "horror_items", 300, "warning", "platinum"),
+    BadgeDefinition("horror_iv", "\"What's your favorite scary movie?\"", "Watch 300 horror media", "horror_items", 300, "warning", "platinum"),
     BadgeDefinition("comedy_i", "Laugh Track", "Watch 25 comedy media", "comedy_items", 25, "happy", "bronze"),
     BadgeDefinition("comedy_ii", "Comedy Regular", "Watch 75 comedy media", "comedy_items", 75, "chatbubble", "silver"),
     BadgeDefinition("comedy_iii", "Punchline Pro", "Watch 150 comedy media", "comedy_items", 150, "mic", "gold"),
