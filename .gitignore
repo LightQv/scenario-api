@@ -44,3 +44,4 @@ link-integration.yaml
 /htmlcov
 
 .DS_Store
+scenario_dump.sql
