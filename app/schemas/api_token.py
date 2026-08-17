@@ -20,7 +20,9 @@ class ApiTokenCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=100)
     token: str | None = Field(default=None, min_length=24, max_length=512)
-    scopes: list[str] = Field(default_factory=lambda: DEFAULT_API_TOKEN_SCOPES.copy(), max_length=10)
+    scopes: list[str] = Field(
+        default_factory=lambda: DEFAULT_API_TOKEN_SCOPES.copy(), max_length=10
+    )
 
     @field_validator("name", "token")
     @classmethod
