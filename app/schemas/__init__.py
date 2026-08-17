@@ -27,6 +27,11 @@ from app.schemas.user_settings import (
     TestConnectionResponse,
 )
 from app.schemas.badge import BadgeListResponse, BadgeResponse
+from app.schemas.api_token import (
+    ALLOWED_API_TOKEN_SCOPES, DEFAULT_API_TOKEN_SCOPES, ApiTokenCreate,
+    ApiTokenCreateResponse, ApiTokenDetail, ApiTokenGenerateResponse,
+    ApiTokenListItem,
+)
 
 __all__ = [
     "UserRegister", "UserLogin", "PasswordReset", "ForgottenPassword", "Token",
@@ -48,4 +53,7 @@ __all__ = [
     "SonarrProfileUpsert", "SonarrSettingsPatch", "SonarrSettingsResponse",
     "TestConnectionResponse",
     "BadgeListResponse", "BadgeResponse",
+    "ALLOWED_API_TOKEN_SCOPES", "DEFAULT_API_TOKEN_SCOPES", "ApiTokenCreate",
+    "ApiTokenCreateResponse", "ApiTokenDetail", "ApiTokenGenerateResponse",
+    "ApiTokenListItem",
 ]

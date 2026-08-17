@@ -1,10 +1,11 @@
-from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status, Cookie
+from typing import Callable, Generator, Optional
+from fastapi import Depends, HTTPException, status, Cookie, Header
 from sqlalchemy.orm import Session
 
 from app.database.session import get_database_session
 from app.core.security import verify_token
 from app.models import User
+from app.services.api_token_service import resolve_bearer_api_token
 
 
 def get_database() -> Generator[Session, None, None]:
@@ -73,3 +74,41 @@ def get_current_user_id(current_user: User = Depends(get_current_user)) -> str:
         str: The user ID as a string
     """
     return str(current_user.id)
+
+
+def get_current_user_with_scope(required_scope: str) -> Callable[..., User]:
+    """Return a dependency accepting cookie auth or scoped API token auth."""
+
+    def dependency(
+        access_token: Optional[str] = Cookie(None, alias="access_token"),
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+        database_session: Session = Depends(get_database),
+    ) -> User:
+        credentials_exception = HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+
+        if access_token:
+            user_id = verify_token(access_token)
+            if user_id is None:
+                raise credentials_exception
+            user = database_session.query(User).filter(User.id == user_id).first()
+            if user is None:
+                raise credentials_exception
+            return user
+
+        bearer_prefix = "Bearer "
+        if not authorization or not authorization.startswith(bearer_prefix):
+            raise credentials_exception
+
+        resolved = resolve_bearer_api_token(database_session, authorization[len(bearer_prefix):].strip())
+        if resolved is None:
+            raise credentials_exception
+
+        user, api_token = resolved
+        if required_scope not in set(api_token.scopes or []):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing API token scope")
+        return user
+
+    return dependency

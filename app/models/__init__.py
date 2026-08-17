@@ -7,6 +7,7 @@ from app.models.integration_sync_status import IntegrationSyncStatus
 from app.models.download_request import DownloadRequest
 from app.models.user_integration_settings import UserIntegrationSettings
 from app.models.user_badge import UserBadge
+from app.models.user_api_token import UserApiToken
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "DownloadRequest",
     "UserIntegrationSettings",
     "UserBadge",
+    "UserApiToken",
 ]

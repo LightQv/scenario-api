@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, get_database
+from app.api.dependencies import get_current_user, get_current_user_with_scope, get_database
 from app.database.session import SessionLocal
 from app.models import User
 from app.schemas import (
@@ -73,7 +73,7 @@ router = APIRouter(
 )
 def sync_radarr_owned_media(
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("owned_media:sync")),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """
@@ -119,7 +119,7 @@ def _run_radarr_owned_media_sync_background(user_id: UUID) -> None:
 )
 def sync_sonarr_owned_media(
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("owned_media:sync")),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """Manually sync Scenario's owned TV episodes from Sonarr."""
@@ -307,7 +307,7 @@ def sonarr_owned_media_webhook(
 def radarr_owned_media_sync_status(
     source: str = Query("RADARR", description="Integration source"),
     media_type: str = Query("movie", description="Synced media type"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("owned_media:read")),
     database_session: Session = Depends(get_database),
 ) -> OwnedMediaSyncStatusResponse:
     """
@@ -325,7 +325,7 @@ def radarr_owned_media_sync_status(
     description="Return all owned media rows stored in Scenario's database.",
 )
 def list_owned_media(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("owned_media:read")),
     database_session: Session = Depends(get_database),
 ) -> list[OwnedMediaResponse]:
     """

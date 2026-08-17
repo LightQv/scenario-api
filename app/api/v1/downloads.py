@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, get_database
+from app.api.dependencies import get_current_user, get_current_user_with_scope, get_database
 from app.models import User
 from app.schemas import (
     DownloadRequestResponse,
@@ -45,7 +45,7 @@ router = APIRouter(
 def request_radarr_movie(
     payload: RadarrMovieDownloadCreate,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("downloads:create")),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse:
     """Request a movie download through Radarr."""
@@ -67,7 +67,7 @@ def request_radarr_movie(
 def request_sonarr_series(
     payload: SonarrSeriesDownloadCreate,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("downloads:create")),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse:
     """Request a whole TV series download through Sonarr."""
@@ -89,7 +89,7 @@ def request_sonarr_series(
 def request_sonarr_season(
     payload: SonarrSeasonDownloadCreate,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("downloads:create")),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse:
     """Request one TV season download through Sonarr."""
@@ -110,7 +110,7 @@ def request_sonarr_season(
     description="Return the current user's download requests.",
 )
 def list_requests(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("downloads:read")),
     database_session: Session = Depends(get_database),
 ) -> list[DownloadRequestResponse]:
     """List all download requests for the current user."""
@@ -192,7 +192,7 @@ def request_status(
     scope: str | None = Query(None, description="Request scope for TV"),
     season_number: int | None = Query(None, description="Season number for season scope"),
     episode_number: int | None = Query(None, description="Episode number for episode scope"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_with_scope("downloads:read")),
     database_session: Session = Depends(get_database),
 ) -> DownloadRequestResponse | None:
     """Return download request status for one media item."""
