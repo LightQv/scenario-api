@@ -5,7 +5,9 @@ This module defines the View SQLAlchemy model which records when users
 have watched movies or TV shows, enabling viewing history and statistics.
 """
 
-from sqlalchemy import Column, String, Integer, ForeignKey, ARRAY
+from datetime import datetime
+from sqlalchemy import Column, String, Integer, ForeignKey, ARRAY, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -60,6 +62,12 @@ class View(Base):
     """
 
     __tablename__ = "view_model"
+
+    # Explicitly supplied by the watched route only. Legacy/imported rows remain
+    # unknown: Base.created_at has no established timezone/provenance contract.
+    recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tmdb_id = Column(Integer, nullable=False, index=True)

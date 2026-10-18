@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List, Optional
+from datetime import datetime, timezone
 
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, View
@@ -119,6 +120,7 @@ def add_view(
         )
 
     new_view = View(
+        recorded_at=datetime.now(timezone.utc),
         tmdb_id=view_data.tmdb_id,
         genre_ids=view_data.genre_ids,
         poster_path=view_data.poster_path,

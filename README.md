@@ -26,6 +26,45 @@ Core components:
 - Email-based password reset flow
 - Docker configuration for development and production deployments
 
+### Private viewing insights
+
+`GET /api/v1/insights/views` requires the existing authenticated cookie and
+returns `{ date_semantics: "recorded_at", views: [...] }` for the authenticated
+owner only, with `Cache-Control: private, no-store`. Each allowlisted legacy
+view adds nullable `recorded_at`; existing public history schemas, watched POST
+payload/success bodies, DELETE responses and release-year statistics are unchanged.
+
+`recorded_at` is an explicit UTC record-creation instant, **not playback time**.
+Only new records created by the watched route receive it. Removing/re-adding a
+record creates a new date. This is a current snapshot, not an immutable event log.
+TV runtime remains episode count, not minutes.
+
+Timestamp discovery: shared `Base.created_at` and initial migrations use naive
+`DateTime`/database `now()`. The SQL-dump restore path supplies no historical
+timezone or provenance guarantee. No live database was inspected to establish a
+different convention. Consequently, legacy/imported dates remain unknown; the
+new endpoint does not reinterpret `created_at` or `updated_at` or append `Z`.
+
+Migration `0016` adds only nullable timezone-aware `view_model.recorded_at`, with
+**no default and no backfill**. It must precede running the new backend code.
+Backend release/migration requires separate approval: verify the current Alembic
+head/schema, take a consistent database backup and verify its restore procedure
+before applying the additive migration. Prefer API-first release; the new PWA
+falls back to all-time history on an old API's 404. To roll back the API, retain
+the unused nullable column; no destructive downgrade is necessary. The migration's
+explicit downgrade drops recording dates and must not be run casually on live data.
+
+Hermetic route/schema/SQL contracts (no settings files or database connections):
+
+```bash
+.venv/bin/python -m unittest discover -s contract_tests -v
+```
+
+These check authorization, owner-bound SQL, allowlisted serialization, legacy
+responses and offline PostgreSQL DDL. They are not a PostgreSQL migration rehearsal.
+The historical pytest bootstrap still references removed `app.core.database`;
+its repair is outside this feature.
+
 ---
 
 ## Setup
