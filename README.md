@@ -71,7 +71,15 @@ that owner's progress for that show.
   The header only detects stale-account actions; it cannot choose an owner or
   replace authentication. CORS allows it for the existing approved origins.
 
-This feature is implemented, not released. **Apply both additive migrations through `0018` before
+Released on 2026-10-18 from application revision `fea08f8`; production is at
+migration `0018` with 140 seeded show-progress cutoffs. The validated database
+backup and previous API image are retained. Existing data fingerprints matched
+across migration; the recording-date backfill was not rerun. See the sibling
+PWA's `docs/DEPLOYMENT_AUDIT.md` for immutable image identities and verification
+boundaries. Episode marking already uses private progress records, not viewing
+history rows, so episode entries never appear in the viewing pages/statistics.
+
+For future installations, **apply both additive migrations through `0018` before
 running this API version**, with a verified backup and watched writes paused
 across migration/API cutover to prevent old writers creating unseeded views.
 Deploy the compatible API before the PWA. Leave additive tables on code rollback;
