@@ -26,6 +26,7 @@ def setup_cors(app: FastAPI) -> None:
             "Accept",
             "Authorization",
             "X-CSRF-Token",
+            "X-Scenario-Owner",
         ],
         expose_headers=["Set-Cookie"],
     )

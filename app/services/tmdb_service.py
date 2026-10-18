@@ -46,6 +46,11 @@ class TmdbService:
 
     base_url = "https://api.themoviedb.org/3"
 
+    def get_release_details(self, path: str, language: str) -> dict:
+        """Fetch release metadata using a server-generated path and validated locale."""
+        separator: str = "&" if "?" in path else "?"
+        return self._request_json(f"{path}{separator}language={language}")
+
     def get_movie_metadata(self, tmdb_id: int) -> TmdbMovieMetadata:
         """Fetch and normalize movie metadata by TMDB ID.
 

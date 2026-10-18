@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, View
 from app.schemas import ViewCreate, ViewResponse
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
+from app.models import ShowProgress, EpisodeProgress
 
 router = APIRouter(
     tags=["Views"],
@@ -134,6 +137,12 @@ def add_view(
     )
 
     database_session.add(new_view)
+    if view_data.media_type == "tv" and view_data.tmdb_id > 0:
+        # A whole-show watched action means caught up through today's aired episodes.
+        database_session.execute(insert(ShowProgress).values(
+            user_id=current_user.id, tmdb_id=view_data.tmdb_id,
+            caught_up_through=datetime.now(timezone.utc).date(),
+        ).on_conflict_do_nothing())
     database_session.commit()
 
     return {"message": "View added successfully"}
@@ -181,4 +190,14 @@ def delete_view(
         )
 
     database_session.delete(view)
+    database_session.flush()
+    if view.media_type == "tv" and database_session.scalar(select(View.id).where(
+        View.viewer_id == current_user.id, View.tmdb_id == view.tmdb_id,
+        View.media_type == "tv",
+    ).limit(1)) is None:
+        # Keep tracking while legacy duplicate show views remain.
+        for model in (EpisodeProgress, ShowProgress):
+            database_session.execute(delete(model).where(
+                model.user_id == current_user.id, model.tmdb_id == view.tmdb_id,
+            ))
     database_session.commit()

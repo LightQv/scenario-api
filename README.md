@@ -26,6 +26,65 @@ Core components:
 - Email-based password reset flow
 - Docker configuration for development and production deployments
 
+### Private episode progress and releases
+
+`GET /api/v1/up-next?language=en-US` (or `fr-FR`) combines the authenticated
+owner's tracked shows with **PENDING Bookmarks in their SYSTEM watchlist**.
+It returns an owner-labelled, `private, no-store` snapshot with `to_watch`,
+`upcoming`, `caught_up`, `as_of` and an explicit metadata-failure count. Custom
+watchlists do not feed this queue. Only public TMDB metadata is cached (one-hour
+TTL, bounded entries and six workers); regular seasons are fetched in append
+batches of at most 15. Air dates do not imply streaming or local availability.
+The PWA calls this destination **Next / La suite**, retaining `/up-next` for
+compatibility. Ended/canceled shows are omitted from `caught_up` only after
+their released regular episodes are all watched; unwatched episodes and any
+announced future release remain visible.
+
+Migration `0018` (`q7r8s9t0u1v2`, after `0017`) adds account-owned
+`show_exclusion` preferences. `PUT /api/v1/up-next/shows/{tmdb_id}/exclusion`
+accepts a validated display-only `{ title, poster_path }` snapshot; DELETE on
+the same path restores the show. Both require the cookie and matching
+`X-Scenario-Owner` guard and are idempotent. The feed's `excluded` list remains
+available without querying TMDB for these shows; exclusion wins over Bookmarks
+and hides the TV identity from both sections, not a same-ID movie. Neither
+operation modifies history, bookmarks, cutoffs or individual episode progress.
+The original cutoff remains fixed while excluded. Preferences are independent
+of views/progress and cascade only on account deletion; metadata snapshots are
+private display copy, not authoritative TMDB records.
+
+Migration `0017` (`p6q7r8s9t0u1`, after `0016`) creates separate show/episode
+progress tables and seeds one fixed UTC conversion-date cutoff per distinct
+existing owner/viewed show. All known released regular episodes through that
+day are assumed watched, by product decision. It **never modifies existing view
+rows, dates or statistics**. Season zero, unknown dates and future episodes are
+excluded. New whole-show watched actions initialize the same fixed assumption;
+duplicate views never slide it. Removing the final show-level view clears only
+that owner's progress for that show.
+
+- `PUT /api/v1/up-next/shows/{tmdb_id}/episodes` accepts positive
+  `{ season_number, episode_number }`, validates the episode's air date against
+  TMDB, and inserts idempotently under a unique owner/show/season/episode key.
+- `PUT /api/v1/up-next/shows/{tmdb_id}/caught-up` accepts `{ through: YYYY-MM-DD }`
+  from the displayed feed; it advances, but never rewinds, the fixed cutoff and
+  rejects future dates. Retrying the same request never uses a newer date.
+- Both writes require the normal cookie and matching `X-Scenario-Owner` UUID.
+  The header only detects stale-account actions; it cannot choose an owner or
+  replace authentication. CORS allows it for the existing approved origins.
+
+This feature is implemented, not released. **Apply both additive migrations through `0018` before
+running this API version**, with a verified backup and watched writes paused
+across migration/API cutover to prevent old writers creating unseeded views.
+Deploy the compatible API before the PWA. Leave additive tables on code rollback;
+the explicit downgrade discards progress without changing original history.
+Do not rerun any historical recording-date backfill for this feature.
+
+Hermetic contracts: `.venv/bin/python -m unittest discover -s contract_tests -v`.
+Actual PostgreSQL rehearsal:
+`.venv/bin/python scripts/test_up_next_postgres.py` uses an already installed
+`postgres:16-alpine` image with `--pull never`, generated fixtures, tmpfs and a
+loopback-only random port; its owned container is removed afterward. It does
+not read configured database credentials or contact TMDB/production.
+
 ### Private viewing insights
 
 `GET /api/v1/insights/views` requires the existing authenticated cookie and
