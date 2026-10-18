@@ -35,7 +35,7 @@ view adds nullable `recorded_at`; existing public history schemas, watched POST
 payload/success bodies, DELETE responses and release-year statistics are unchanged.
 
 `recorded_at` is an explicit UTC record-creation instant, **not playback time**.
-Only new records created by the watched route receive it. Removing/re-adding a
+New records created by the watched route receive it. Removing/re-adding a
 record creates a new date. This is a current snapshot, not an immutable event log.
 TV runtime remains episode count, not minutes.
 
@@ -44,6 +44,8 @@ Timestamp discovery: shared `Base.created_at` and initial migrations use naive
 timezone or provenance guarantee. No live database was inspected to establish a
 different convention. Consequently, legacy/imported dates remain unknown; the
 new endpoint does not reinterpret `created_at` or `updated_at` or append `Z`.
+An optional operator-approved backfill can now adopt legacy creation dates after
+their source timezone and provenance have been reviewed (see below).
 
 Migration `0016` adds only nullable timezone-aware `view_model.recorded_at`, with
 **no default and no backfill**. It must precede running the new backend code.
@@ -59,6 +61,60 @@ Hermetic route/schema/SQL contracts (no settings files or database connections):
 ```bash
 .venv/bin/python -m unittest discover -s contract_tests -v
 ```
+
+#### Optional historical recording-date backfill
+
+This is a separately approved **data migration**, not an automatic Alembic step
+or startup action. It works after migration `0016` and can be run after production
+deployment. It changes no schema or public API. No production backfill has been
+performed or real PostgreSQL rehearsal established by the hermetic tests.
+
+Before use:
+
+1. Take a consistent database backup and verify how to restore it. Record the
+   database/release and the chosen timezone in the operator's change record.
+2. Establish the **historical DB session timezone** used when naive `created_at`
+   values were written, plus import provenance. A current `SHOW TimeZone` is
+   evidence, not proof of historical configuration. These are creation/import
+   dates, not playback dates. Never use the viewer's current timezone as a guess.
+3. If histories have different conventions, scope each operation with `--owner
+   ACCOUNT_UUID`. Do not apply one timezone across mixed-provenance accounts.
+   Mixed conventions within one account require separate investigation.
+4. Set `SOURCE_ZONE` to the verified IANA timezone (for example `UTC` only if
+   verified), then preview from the API project root in its configured environment:
+
+   ```bash
+   python -m app.database.backfill_view_dates --source-timezone "$SOURCE_ZONE"
+   ```
+
+   Preview uses a read-only transaction and reports candidate/convertible/rejected
+   counts and up to five timestamp-only samples. Check timezone conversions,
+   especially year/month boundaries. Keep output private. Invalid dates, DST gaps
+   and repeated local times are rejected, not silently assigned an offset.
+
+5. After separate execution approval, use the reviewed count (not blindly 575):
+
+   ```bash
+   python -m app.database.backfill_view_dates --source-timezone "$SOURCE_ZONE" \
+     --apply --expected-count REVIEWED_COUNT --acknowledge-inferred-dates
+   ```
+
+   Include the same `--owner` on preview and apply if scoped. All candidates must
+   be convertible and their count must match. Apply locks candidate rows, fills
+   only `recorded_at IS NULL`, and commits atomically; failures roll back. Five-
+   second lock and sixty-second statement timeouts bound contention. Existing
+   recording dates, `created_at` and `updated_at` are never overwritten. Repeat
+   preview should show no candidates unless new undated imports have arrived.
+
+6. Reopen Your Scenario to refresh its snapshot; verify totals are unchanged and
+   month/year selection now uses adopted creation dates. Imports can cluster on
+   their import date. The current API does not distinguish inferred creation dates
+   from new explicit recording dates: accepting that equivalence is part of this
+   opt-in operation. Comparisons still require their existing coverage checks.
+
+There is deliberately no blanket “clear dates” rollback: it could erase genuine
+new dates. Retain the backup and operator record; any reversal must be scoped to
+the actual affected records. Never run an Alembic downgrade to undo this backfill.
 
 These check authorization, owner-bound SQL, allowlisted serialization, legacy
 responses and offline PostgreSQL DDL. They are not a PostgreSQL migration rehearsal.

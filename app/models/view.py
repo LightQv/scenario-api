@@ -63,8 +63,8 @@ class View(Base):
 
     __tablename__ = "view_model"
 
-    # Explicitly supplied by the watched route only. Legacy/imported rows remain
-    # unknown: Base.created_at has no established timezone/provenance contract.
+    # Explicit UTC instant for new watched records; legacy values remain unknown
+    # unless an operator explicitly backfills with a verified source timezone.
     recorded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
