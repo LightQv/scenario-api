@@ -264,6 +264,32 @@ its repair is outside this feature.
 
 ---
 
+### Release notifications (migration 0021)
+
+Owner-private `/api/v1/notifications` GET/PUT and `/device` PUT/DELETE plus `/test`
+POST implement opt-in daily release summaries. Writes require the authenticated
+cookie and matching `X-Scenario-Owner`. Preferences default off; each browser must
+separately grant permission. Only today's unwatched regular tracked episodes and
+bookmarked unwatched movies qualify; no history/progress is changed. Payloads are
+generic and contain no media titles/account identifiers.
+
+Apply additive migration `0021` (`t0u1v2w3x4y5`) before starting compatible code.
+Configure server-only `WEB_PUSH_ENABLED`, `WEB_PUSH_PRIVATE_KEY`,
+`WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_SUBJECT`, and the existing integration encryption
+key. Only the public VAPID key is returned to authenticated browsers. Keep private
+keys stable, out of images/source/logs. The worker uses stored catalogues, bounded
+provider requests, PostgreSQL owner locks and unique device/day receipts; expired
+devices are removed and retries stop at midnight/four attempts. Delivery is
+best-effort, not exact-time/exactly-once. Provider destinations are allowlisted and
+redirects disabled. Apple/Google/Mozilla still carry encrypted push traffic.
+
+Run `.venv/bin/python scripts/test_notifications_postgres.py` for isolated real
+PostgreSQL migration/concurrency/DST/retry/opt-out checks (owned disposable
+database, no configured credentials or real push delivery). Frontend setup,
+isolated Tailscale HTTPS and physical-iPhone acceptance boundaries are documented
+in the sibling PWA's `docs/NOTIFICATIONS.md`. This section describes the
+implementation, not a claim of physical-device acceptance or live release.
+
 ## Setup
 
 Clone the repository:

@@ -17,6 +17,7 @@ from app.core.settings import settings
 from app.api.v1.router import main_router
 from app.services.owned_media_scheduler import owned_media_scheduler
 from app.services.release_catalog_scheduler import release_catalog_scheduler
+from app.services.notification_scheduler import notification_scheduler
 
 
 @asynccontextmanager
@@ -29,9 +30,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     owned_media_scheduler.start()
     release_catalog_scheduler.start()
+    notification_scheduler.start()
     try:
         yield
     finally:
+        await notification_scheduler.stop()
         await release_catalog_scheduler.stop()
         await owned_media_scheduler.stop()
 

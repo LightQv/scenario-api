@@ -12,6 +12,7 @@ from app.models.episode_progress import ShowProgress, EpisodeProgress
 from app.models.show_exclusion import ShowExclusion
 from app.models.release_catalog import ReleaseCatalog
 from app.models.progress_action import ProgressAction
+from app.models.notification import NotificationPreference, PushSubscription, NotificationDelivery
 
 __all__ = [
     "User",
@@ -29,4 +30,7 @@ __all__ = [
     "ShowExclusion",
     "ReleaseCatalog",
     "ProgressAction",
+    "NotificationPreference",
+    "PushSubscription",
+    "NotificationDelivery",
 ]
