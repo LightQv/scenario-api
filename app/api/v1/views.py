@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, View
@@ -142,7 +142,13 @@ def add_view(
         database_session.execute(insert(ShowProgress).values(
             user_id=current_user.id, tmdb_id=view_data.tmdb_id,
             caught_up_through=datetime.now(timezone.utc).date(),
-        ).on_conflict_do_nothing())
+        ).on_conflict_do_update(
+            index_elements=[ShowProgress.user_id, ShowProgress.tmdb_id],
+            set_={"caught_up_through": datetime.now(timezone.utc).date()},
+            # Partial/start-only tracking has no historical caught-up assumption.
+            # Repeated legacy whole-show additions must not slide a real cutoff.
+            where=ShowProgress.caught_up_through == date.min,
+        ))
     database_session.commit()
 
     return {"message": "View added successfully"}

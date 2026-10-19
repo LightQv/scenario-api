@@ -31,14 +31,15 @@ Core components:
 `GET /api/v1/up-next?language=en-US` (or `fr-FR`) combines the authenticated
 owner's tracked shows with **PENDING Bookmarks in their SYSTEM watchlist**.
 It returns an owner-labelled, `private, no-store` snapshot with `to_watch`,
-`upcoming`, `caught_up`, `as_of` and an explicit metadata-failure count. Custom
+`upcoming`, `caught_up`, `finished`, `as_of` and an explicit metadata-failure count. Custom
 watchlists do not feed this queue. Only public TMDB metadata is cached (one-hour
 TTL, bounded entries and six workers); regular seasons are fetched in append
 batches of at most 15. Air dates do not imply streaming or local availability.
 The PWA calls this destination **Next / La suite**, retaining `/up-next` for
 compatibility. Ended/canceled shows are omitted from `caught_up` only after
 their released regular episodes are all watched; unwatched episodes and any
-announced future release remain visible.
+announced future release remain visible. Such completed titles remain available
+in `finished`, a consult-only listing (no restore action).
 
 Migration `0018` (`q7r8s9t0u1v2`, after `0017`) adds account-owned
 `show_exclusion` preferences. `PUT /api/v1/up-next/shows/{tmdb_id}/exclusion`
@@ -58,16 +59,27 @@ existing owner/viewed show. All known released regular episodes through that
 day are assumed watched, by product decision. It **never modifies existing view
 rows, dates or statistics**. Season zero, unknown dates and future episodes are
 excluded. New whole-show watched actions initialize the same fixed assumption;
-duplicate views never slide it. Removing the final show-level view clears only
+duplicate views never slide a nonempty cutoff. A first whole-show action after
+partial/start-only tracking catches up released episodes too. Removing the final show-level view clears only
 that owner's progress for that show.
 
 - `PUT /api/v1/up-next/shows/{tmdb_id}/episodes` accepts positive
   `{ season_number, episode_number }`, validates the episode's air date against
   TMDB, and inserts idempotently under a unique owner/show/season/episode key.
+  A first episode automatically starts tracking with an empty baseline; it never
+  assumes earlier episodes/seasons were watched or adds a viewing-history row.
+- `GET /api/v1/up-next/shows/{tmdb_id}/progress` returns an owner-labelled,
+  no-store snapshot of released regular episode watched states and `as_of`.
+- `PUT /api/v1/up-next/shows/{tmdb_id}/tracking` starts tracking at the empty
+  `0001-01-01` cutoff after verifying the show. Replays preserve existing progress.
+- `PUT /api/v1/up-next/shows/{tmdb_id}/seasons/{season_number}` accepts
+  `{ through: YYYY-MM-DD }` from the progress snapshot, verifies the season and
+  marks only its released regular episodes through that day. Unknown/future dates
+  and specials are excluded. It starts tracking without creating history.
 - `PUT /api/v1/up-next/shows/{tmdb_id}/caught-up` accepts `{ through: YYYY-MM-DD }`
   from the displayed feed; it advances, but never rewinds, the fixed cutoff and
   rejects future dates. Retrying the same request never uses a newer date.
-- Both writes require the normal cookie and matching `X-Scenario-Owner` UUID.
+- All writes require the normal cookie and matching `X-Scenario-Owner` UUID.
   The header only detects stale-account actions; it cannot choose an owner or
   replace authentication. CORS allows it for the existing approved origins.
 
@@ -78,6 +90,8 @@ across migration; the recording-date backfill was not rerun. See the sibling
 PWA's `docs/DEPLOYMENT_AUDIT.md` for immutable image identities and verification
 boundaries. Episode marking already uses private progress records, not viewing
 history rows, so episode entries never appear in the viewing pages/statistics.
+The direct season/episode tracking extension reuses migration `0018`'s schema;
+do not reseed progress or rerun any migration/backfill to enable it.
 
 For future installations, **apply both additive migrations through `0018` before
 running this API version**, with a verified backup and watched writes paused

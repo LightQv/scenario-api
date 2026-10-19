@@ -10,7 +10,7 @@ finally; --rm removes its ephemeral filesystem.
 import importlib.util
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
@@ -96,6 +96,29 @@ def run() -> None:
         with Session(engine) as db:
             assert db.scalar(select(func.count()).select_from(EpisodeProgress)) == 1
             assert db.execute(select(View.__table__).order_by(View.id)).all() == before
+            # A brand-new show can start with one episode or one season, without
+            # a View or assuming previous seasons watched. Replay stays scoped.
+            with patch.object(service, "metadata", return_value={"episodes": [
+                {"episode_number": 1, "air_date": "2020-01-01"},
+                {"episode_number": 2, "air_date": "2020-01-02"},
+                {"episode_number": 3, "air_date": "2999-01-01"},
+                {"episode_number": 4, "air_date": None},
+            ]}):
+                for _ in range(2):
+                    service.mark_episode(db, owner, 99, EpisodeWatched(season_number=2, episode_number=1))
+                    service.mark_season(db, owner, 99, 2, date(2020, 1, 2))
+                assert db.get(ShowProgress, (owner, 99)).caught_up_through == date.min
+                rows = db.scalars(select(EpisodeProgress).where(EpisodeProgress.user_id == owner, EpisodeProgress.tmdb_id == 99)).all()
+                assert {(row.season_number, row.episode_number) for row in rows} == {(2, 1), (2, 2)}
+                assert db.get(ShowProgress, (other, 99)) is None
+                assert db.execute(select(View.__table__).order_by(View.id)).all() == before
+                add_view(ViewCreate(**{**payload, "tmdb_id": 99}, viewer_id=owner), db.get(User, owner), db)
+                db.expire_all()
+                assert db.get(ShowProgress, (owner, 99)).caught_up_through == service.utc_today()
+                temporary = db.scalar(select(View).where(View.viewer_id == owner, View.tmdb_id == 99))
+                delete_view(temporary.id, db.get(User, owner), db)
+                db.expire_all()
+                assert db.execute(select(View.__table__).order_by(View.id)).all() == before
             cutoff = db.get(ShowProgress, (owner, 42)).caught_up_through
             tomorrow = cutoff + timedelta(days=1)
             queue = Watchlist(title="Bookmarks", type="SYSTEM", author_id=owner)

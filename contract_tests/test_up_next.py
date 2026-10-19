@@ -158,7 +158,8 @@ class ReleaseContracts(TestCase):
             self.details["status"] = status
             ready, upcoming, caught = self.build(self.today)
             self.assertIsNone(ready)
-            self.assertIsNone(caught)
+            self.assertEqual(caught.status, status)
+            self.assertEqual(caught.remaining, 0)
             self.assertIsNotNone(upcoming)  # TMDB can mark Ended before an announced finale airs.
             ready, _, caught = self.build(date(2026, 10, 1))
             self.assertEqual(ready.remaining, 2)
@@ -182,6 +183,19 @@ class ReleaseContracts(TestCase):
         self.assertFalse(any(call.args[0].startswith("/tv/") for call in self.metadata.call_args_list))
         sql = db.scalars.call_args.args[0].compile(dialect=postgresql.dialect())
         self.assertEqual(sql.params["user_id_1"], owner)
+
+    def test_finished_listing_is_read_only_and_separate_from_caught_up(self) -> None:
+        """Ended caught-up titles remain consultable, with future releases retained."""
+        self.details["status"] = "Ended"
+        db = MagicMock()
+        db.scalars.return_value.all.side_effect = [[SimpleNamespace(tmdb_id=42, caught_up_through=self.today)], [], [], []]
+        with patch.object(service, "utc_today", return_value=self.today):
+            feed = service.release_feed(db, uuid4(), "en-US")
+        self.assertEqual(feed.caught_up, [])
+        self.assertEqual([entry.tmdb_id for entry in feed.finished], [42])
+        self.assertEqual(len(feed.upcoming), 1)
+        db.execute.assert_not_called()
+        db.commit.assert_not_called()
 
 
 class ProgressApiContracts(TestCase):
@@ -227,16 +241,17 @@ class ProgressApiContracts(TestCase):
         self.assertEqual(self.client.put("/api/v1/up-next/shows/0/episodes", json={"season_number": 1, "episode_number": 1}).status_code, 422)
         self.db.execute.assert_not_called()
 
-    def test_missing_tracking_cannot_write_another_owners_show(self) -> None:
-        """Row lock lookup binds both authenticated owner and show identity."""
+    def test_missing_tracking_starts_only_this_owners_show(self) -> None:
+        """A first episode creates an empty owner-bound baseline, never neighbors."""
         self.authenticate()
         self.db.scalar.return_value = None
-        response = self.client.put("/api/v1/up-next/shows/42/episodes", json={"season_number": 1, "episode_number": 1})
-        self.assertEqual(response.status_code, 404)
-        statement = self.db.scalar.call_args.args[0].compile(dialect=postgresql.dialect())
-        self.assertEqual(statement.params["user_id_1"], self.owner)
-        self.assertEqual(statement.params["tmdb_id_1"], 42)
-        self.assertIn("FOR UPDATE", str(statement))
+        with patch.object(service, "metadata", return_value={"episodes": [{"episode_number": 1, "air_date": "2020-01-01"}]}):
+            response = self.client.put("/api/v1/up-next/shows/42/episodes", json={"season_number": 1, "episode_number": 1})
+        self.assertEqual(response.status_code, 204)
+        statement = self.db.execute.call_args_list[0].args[0].compile(dialect=postgresql.dialect())
+        self.assertEqual(statement.params["user_id"], self.owner)
+        self.assertEqual(statement.params["tmdb_id"], 42)
+        self.assertEqual(statement.params["caught_up_through"], date.min)
 
     def test_cookie_owner_change_or_missing_guard_cannot_mutate_from_stale_feed(self) -> None:
         """An authenticated but different cookie owner cannot act on the old user's card."""
@@ -262,7 +277,10 @@ class ProgressApiContracts(TestCase):
             sql = call.args[0].compile(dialect=postgresql.dialect())
             self.assertIn("ON CONFLICT DO NOTHING", str(sql))
             self.assertEqual(sql.params["user_id"], self.owner)
-            self.assertEqual(sql.params["episode_number"], 3)
+            if "episode_number" in sql.params:
+                self.assertEqual(sql.params["episode_number"], 3)
+            else:
+                self.assertEqual(sql.params["caught_up_through"], date.min)
             self.assertNotIn("view_model", str(sql))
         self.db.add.assert_not_called()
 
@@ -285,6 +303,68 @@ class ProgressApiContracts(TestCase):
             self.assertEqual(self.client.put("/api/v1/up-next/shows/42/caught-up", json={"through": "2026-10-10"}).status_code, 204)
             self.assertEqual(row.caught_up_through, date(2026, 10, 10))
         self.assertEqual(self.client.put("/api/v1/up-next/shows/42/caught-up", json={"through": "2999-01-01"}).status_code, 422)
+
+    def test_season_marks_only_verified_released_episodes_through_submitted_date(self) -> None:
+        """Season writes never catch up earlier seasons, unknown dates or future releases."""
+        self.authenticate()
+        catalog = {"episodes": [
+            {"episode_number": 1, "air_date": "2020-01-01"},
+            {"episode_number": 3, "air_date": "2026-10-11"},
+            {"episode_number": 4, "air_date": None},
+            {"episode_number": 5, "air_date": "2999-01-01"},
+        ]}
+        with patch.object(service, "metadata", return_value=catalog):
+            for _ in range(2):
+                response = self.client.put("/api/v1/up-next/shows/42/seasons/2", json={"through": "2026-10-10"})
+                self.assertEqual(response.status_code, 204)
+        statements = [call.args[0].compile(dialect=postgresql.dialect()) for call in self.db.execute.call_args_list]
+        self.assertEqual(statements[0].params["caught_up_through"], date.min)
+        self.assertEqual(statements[1].params["episode_number_m0"], 1)
+        self.assertEqual(statements[1].params["season_number_m0"], 2)
+        self.assertNotIn("episode_number_m1", statements[1].params)
+        self.assertTrue(all("view_model" not in str(statement) for statement in statements))
+
+    def test_new_actions_require_matching_owner_and_reject_specials_future_and_bad_metadata(self) -> None:
+        """No tracking baseline is written when validation or verification fails."""
+        self.authenticate()
+        self.client.headers["X-Scenario-Owner"] = str(uuid4())
+        self.assertEqual(self.client.put("/api/v1/up-next/shows/42/tracking").status_code, 403)
+        self.assertEqual(self.client.put("/api/v1/up-next/shows/42/seasons/1", json={"through": "2020-01-01"}).status_code, 403)
+        self.client.headers["X-Scenario-Owner"] = str(self.owner)
+        self.assertEqual(self.client.put("/api/v1/up-next/shows/42/seasons/0", json={"through": "2020-01-01"}).status_code, 422)
+        self.assertEqual(self.client.put("/api/v1/up-next/shows/42/seasons/1", json={"through": "2999-01-01"}).status_code, 422)
+        with patch.object(service, "metadata", return_value={"episodes": []}):
+            self.assertEqual(self.client.put("/api/v1/up-next/shows/42/seasons/1", json={"through": "2020-01-01"}).status_code, 422)
+        with patch.object(service, "metadata", side_effect=RuntimeError("unavailable")):
+            self.assertEqual(self.client.put("/api/v1/up-next/shows/42/tracking").status_code, 503)
+        self.db.execute.assert_not_called()
+
+    def test_start_is_idempotent_and_cannot_reset_saved_progress(self) -> None:
+        """Starting a show never implies viewing or slides an existing baseline."""
+        self.authenticate()
+        with patch.object(service, "metadata", return_value={"id": 42}):
+            for _ in range(2):
+                self.assertEqual(self.client.put("/api/v1/up-next/shows/42/tracking").status_code, 204)
+        for call in self.db.execute.call_args_list:
+            sql = call.args[0].compile(dialect=postgresql.dialect())
+            self.assertIn("ON CONFLICT DO NOTHING", str(sql))
+            self.assertEqual(sql.params["caught_up_through"], date.min)
+            self.assertEqual(sql.params["user_id"], self.owner)
+        self.db.add.assert_not_called()
+
+    def test_progress_read_owner_no_store_and_released_only(self) -> None:
+        """Details can read partial progress with no whole-show history prerequisite."""
+        self.authenticate()
+        self.db.scalar.return_value = SimpleNamespace(caught_up_through=date.min)
+        self.db.scalars.return_value.all.return_value = [SimpleNamespace(season_number=2, episode_number=1)]
+        episodes = [service.EpisodeRef(season_number=season, episode_number=1, name="Episode", air_date=day) for season, day in [(1, date(2020, 1, 1)), (2, date(2020, 1, 2)), (3, date(2999, 1, 1))]]
+        with patch.object(service, "metadata", return_value={}), patch.object(service, "regular_episodes", return_value=episodes):
+            response = self.client.get("/api/v1/up-next/shows/42/progress")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertEqual(response.json()["user_id"], str(self.owner))
+        self.assertEqual([ep["watched"] for ep in response.json()["episodes"]], [False, True])
+        self.db.execute.assert_not_called()
 
     def test_exclude_and_restore_are_idempotent_owner_bound_preferences_only(self) -> None:
         """No view, bookmark, cutoff or episode record is mutated by exclusions."""
@@ -392,7 +472,8 @@ class MigrationContracts(TestCase):
         payload = ViewCreate(viewer_id=owner, tmdb_id=42, media_type="tv", title="Show", poster_path="", backdrop_path="", release_date="2020-01-01", release_year="2020", runtime=100, genre_ids=[])
         add_view(payload, SimpleNamespace(id=owner), db)
         sql = db.execute.call_args.args[0].compile(dialect=postgresql.dialect())
-        self.assertIn("ON CONFLICT DO NOTHING", str(sql))
+        self.assertIn("ON CONFLICT (user_id, tmdb_id) DO UPDATE", str(sql))
+        self.assertEqual(sql.params["caught_up_through_1"], date.min)
         self.assertEqual(sql.params["caught_up_through"], service.utc_today())
 
     def test_last_show_view_removal_clears_only_that_owners_progress(self) -> None:

@@ -58,6 +58,7 @@ class NextFeed(BaseModel):
     to_watch: list[NextEntry]
     upcoming: list[NextEntry]
     caught_up: list[NextEntry]
+    finished: list[NextEntry] = Field(default_factory=list)
     excluded: list[ExcludedShow] = Field(default_factory=list)
     unavailable: int = 0
 
@@ -75,3 +76,21 @@ class CaughtUpRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     through: CalendarDate
+
+
+class WatchedEpisodeState(BaseModel):
+    """Released regular episode and its authoritative private watched state."""
+
+    season_number: int
+    episode_number: int
+    watched: bool
+
+
+class ShowProgressState(BaseModel):
+    """Owner-labelled progress for details, including shows not yet tracked."""
+
+    user_id: UUID
+    tmdb_id: int
+    as_of: CalendarDate
+    tracked: bool
+    episodes: list[WatchedEpisodeState]

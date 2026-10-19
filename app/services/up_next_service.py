@@ -14,7 +14,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, Watchlist
-from app.schemas.up_next import ExcludedShow, EpisodeRef, EpisodeWatched, NextEntry, NextFeed, ShowExclusionRequest
+from app.schemas.up_next import (
+    ExcludedShow, EpisodeRef, EpisodeWatched, NextEntry, NextFeed,
+    ShowExclusionRequest, ShowProgressState, WatchedEpisodeState,
+)
 from app.services.tmdb_service import TmdbService
 
 # Only public metadata is cached. Private feeds/progress never enter this cache.
@@ -146,9 +149,6 @@ def build_title(
             **base, **progress, date=missing[0].air_date, episode=missing[0],
         )
         return ready, upcoming, None
-    if base["status"] in ("Ended", "Canceled"):
-        # Keep any announced future release, but no completed-show clutter.
-        return None, upcoming, None
     caught_up: NextEntry = NextEntry(
         **base, **progress, date=future[0].air_date if future else None,
     )
@@ -227,31 +227,113 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
         if upcoming:
             feed.upcoming.append(upcoming)
         if caught_up:
-            feed.caught_up.append(caught_up)
+            if caught_up.status in ("Ended", "Canceled"):
+                feed.finished.append(caught_up)
+            else:
+                feed.caught_up.append(caught_up)
     feed.to_watch.sort(key=lambda item: (item.date or date.max, item.title, item.tmdb_id))
     feed.upcoming.sort(key=lambda item: (
         item.date or date.max, item.title, item.media_type, item.tmdb_id,
     ))
     feed.caught_up.sort(key=lambda item: (item.date or date.max, item.title, item.tmdb_id))
+    feed.finished.sort(key=lambda item: (item.title, item.tmdb_id))
     return feed
 
 
-def mark_episode(db: Session, user_id: UUID, tmdb_id: int, episode: EpisodeWatched) -> None:
-    """Idempotently mark a server-verified aired episode of an already tracked show."""
-    progress = db.scalar(select(ShowProgress).where(
-        ShowProgress.user_id == user_id, ShowProgress.tmdb_id == tmdb_id,
-    ).with_for_update())
-    if progress is None:
-        raise HTTPException(404, "Tracked show not found")
+def initialize_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:
+    """Start from zero without overwriting an existing cutoff or creating history.
+
+    Args:
+        db: Request-scoped transaction.
+        user_id: Authenticated owner.
+        tmdb_id: Server-verified show identity.
+    """
+    db.execute(insert(ShowProgress).values(
+        user_id=user_id, tmdb_id=tmdb_id, caught_up_through=date.min,
+    ).on_conflict_do_nothing())
+
+
+def show_progress(db: Session, user_id: UUID, tmdb_id: int) -> ShowProgressState:
+    """Read released episode states without creating progress or assuming history."""
+    today: date = utc_today()
     try:
-        season = metadata(f"/tv/{tmdb_id}/season/{episode.season_number}", "en-US")
+        episodes: list[EpisodeRef] = regular_episodes(
+            metadata(f"/tv/{tmdb_id}", "en-US"), tmdb_id, "en-US",
+        )
+    except (RuntimeError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(503, "Episode metadata unavailable; try again") from error
+    progress: ShowProgress | None = db.scalar(select(ShowProgress).where(
+        ShowProgress.user_id == user_id, ShowProgress.tmdb_id == tmdb_id,
+    ))
+    rows: list[EpisodeProgress] = list(db.scalars(select(EpisodeProgress).where(
+        EpisodeProgress.user_id == user_id, EpisodeProgress.tmdb_id == tmdb_id,
+    )).all())
+    watched: set[tuple[int, int]] = {(row.season_number, row.episode_number) for row in rows}
+    return ShowProgressState(
+        user_id=user_id, tmdb_id=tmdb_id, as_of=today, tracked=progress is not None,
+        episodes=[WatchedEpisodeState(
+            season_number=ep.season_number, episode_number=ep.episode_number,
+            watched=progress is not None and (
+                ep.air_date <= progress.caught_up_through
+                or (ep.season_number, ep.episode_number) in watched
+            ),
+        ) for ep in episodes if ep.air_date <= today],
+    )
+
+
+def start_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:
+    """Verify the show before creating an empty, idempotent tracking baseline."""
+    try:
+        details: dict[str, Any] = metadata(f"/tv/{tmdb_id}", "en-US")
+        if details.get("id") != tmdb_id:
+            raise RuntimeError("Invalid show identity")
+    except RuntimeError as error:
+        raise HTTPException(503, "Show metadata unavailable; try again") from error
+    initialize_tracking(db, user_id, tmdb_id)
+    db.commit()
+
+
+def mark_season(
+    db: Session, user_id: UUID, tmdb_id: int, season_number: int, through: date,
+) -> None:
+    """Mark only this season's released episodes through the displayed UTC date."""
+    if through > utc_today():
+        raise HTTPException(422, "Cannot mark future episodes watched")
+    episodes: list[dict[str, Any]] = season_catalog(tmdb_id, season_number)
+    released: set[int] = set()
+    for episode in episodes:
+        number: Any = episode.get("episode_number")
+        air_date: date | None = parsed_date(episode.get("air_date"))
+        if (isinstance(number, int) and not isinstance(number, bool)
+                and number > 0 and air_date is not None and air_date <= through):
+            released.add(number)
+    if not released:
+        raise HTTPException(422, "No released regular episodes in this season")
+    initialize_tracking(db, user_id, tmdb_id)
+    db.execute(insert(EpisodeProgress).values([
+        dict(
+            user_id=user_id, tmdb_id=tmdb_id, season_number=season_number,
+            episode_number=number,
+        ) for number in sorted(released)
+    ]).on_conflict_do_nothing())
+    db.commit()
+
+
+def season_catalog(tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
+    """Verify a complete season before any progress is written."""
+    try:
+        season: dict[str, Any] = metadata(f"/tv/{tmdb_id}/season/{season_number}", "en-US")
     except RuntimeError as error:
         raise HTTPException(503, "Episode metadata unavailable; try again") from error
-    season_episodes: Any = season.get("episodes")
-    if not isinstance(season_episodes, list) or any(
-        not isinstance(item, dict) for item in season_episodes
-    ):
+    episodes: Any = season.get("episodes")
+    if not isinstance(episodes, list) or any(not isinstance(item, dict) for item in episodes):
         raise HTTPException(503, "Episode metadata unavailable; try again")
+    return episodes
+
+
+def mark_episode(db: Session, user_id: UUID, tmdb_id: int, episode: EpisodeWatched) -> None:
+    """Mark one verified aired episode, starting tracking without assuming its neighbors."""
+    season_episodes: list[dict[str, Any]] = season_catalog(tmdb_id, episode.season_number)
     match: dict[str, Any] | None = next((
         item for item in season_episodes
         if item.get("episode_number") == episode.episode_number
@@ -259,6 +341,7 @@ def mark_episode(db: Session, user_id: UUID, tmdb_id: int, episode: EpisodeWatch
     air_date: date | None = parsed_date(match.get("air_date")) if match else None
     if not air_date or air_date > utc_today():
         raise HTTPException(422, "Only released regular episodes can be marked watched")
+    initialize_tracking(db, user_id, tmdb_id)
     db.execute(insert(EpisodeProgress).values(
         user_id=user_id, tmdb_id=tmdb_id, season_number=episode.season_number,
         episode_number=episode.episode_number,
