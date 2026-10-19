@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from time import monotonic
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -219,6 +220,8 @@ def process_notifications(db: Session, now: datetime) -> None:
     """
     if not available():
         return
+    started: float = monotonic()
+    tick_time: datetime = now
     owners = db.scalars(select(NotificationPreference.user_id).where(NotificationPreference.enabled.is_(True))).all()
     db.commit()
     for owner in owners:
@@ -242,6 +245,9 @@ def process_notifications(db: Session, now: datetime) -> None:
         db.commit()
     # Process a bounded batch; separate transactions isolate device failures.
     for _ in range(20):
+        # Earlier provider requests can take seconds. Do not send yesterday's
+        # queued digest after midnight merely because this cycle started earlier.
+        now = tick_time + timedelta(seconds=int(monotonic() - started))
         candidate = db.execute(select(NotificationDelivery.id, PushSubscription.user_id).join(
             PushSubscription, PushSubscription.id == NotificationDelivery.subscription_id,
         ).where(

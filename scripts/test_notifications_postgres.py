@@ -121,7 +121,12 @@ def run() -> None:
                 assert job.attempts == 4 and job.status == "failed"
                 job.status = "pending"
                 db.commit()
-            tick(now + timedelta(days=1))
+            before_midnight_expiry = push.call_count
+            # An earlier bounded provider request can span local midnight. A
+            # sender must recheck wall time, not reuse its cycle-start date.
+            with patch.object(service, "monotonic", side_effect=[0, 86400, 86400]):
+                tick(now)
+            assert push.call_count == before_midnight_expiry
             with Session(engine) as db:
                 assert db.scalar(select(NotificationDelivery)).status == "cancelled"
                 job = db.scalar(select(NotificationDelivery))
