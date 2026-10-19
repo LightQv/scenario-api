@@ -112,3 +112,21 @@ class NotificationContracts(TestCase):
         self.assertEqual(data["title"], "Scenario")
         self.assertFalse(send.call_args.kwargs["requests_session"].trust_env)
         self.assertEqual(send.call_args.kwargs["timeout"], 10)
+
+    def test_real_vapid_and_payload_encryption_without_network(self) -> None:
+        """Exercise the pinned push library with real P-256 keys and fake transport."""
+        import json
+        private = ec.generate_private_key(ec.SECP256R1())
+        receiver = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+        encode = lambda value: base64.urlsafe_b64encode(value).decode().rstrip("=")
+        subscription = json.dumps({"endpoint": "https://web.push.apple.com/fixture", "keys": {"p256dh": encode(receiver), "auth": encode(b"a" * 16)}})
+        config = SimpleNamespace(WEB_PUSH_PRIVATE_KEY=encode(private.private_numbers().private_value.to_bytes(32, "big")), WEB_PUSH_SUBJECT="https://scenario.example.test")
+        response = service.requests.Response()
+        response.status_code = 201
+        with patch.object(service, "settings", config), patch.object(service.PushSession, "request", return_value=response) as transport:
+            self.assertEqual(service.send_push(subscription, "en-US", "2026-10-20"), 201)
+        request = transport.call_args
+        self.assertEqual(request.args[:2], ("POST", "https://web.push.apple.com/fixture"))
+        self.assertIn("vapid", request.kwargs["headers"]["Authorization"])
+        self.assertEqual(request.kwargs["headers"]["content-encoding"], "aes128gcm")
+        self.assertNotIn(b"Your release-day summary", request.kwargs["data"])
