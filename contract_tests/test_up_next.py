@@ -54,13 +54,14 @@ class ReleaseContracts(TestCase):
             ]},
             "/movie/42": {"title": "A film", "release_date": "2026-11-06"},
         }
-        def catalog(path: str, language: str) -> dict:
+        def catalog(path: str, language: str, db=None) -> dict:
             """Emulate TMDB's appended-season response, not a custom API shape."""
             if "?append_to_response=" in path:
                 root, appended = path.split("?append_to_response=")
                 return {season: self.episodes[f"{root}/{season}"] for season in appended.split(",")}
             return self.episodes[path]
         self.metadata = patch.object(service, "metadata", side_effect=catalog).start()
+        patch.object(service, "preload_catalogs").start()
         self.addCleanup(patch.stopall)
 
     def build(self, cutoff: date | None, watched: frozenset[tuple[int, int]] = frozenset()) -> tuple:
@@ -111,7 +112,7 @@ class ReleaseContracts(TestCase):
     def test_large_catalog_is_batched_below_tmdb_append_limit(self) -> None:
         """Long-running shows do not need one HTTP request per season."""
         details = {"seasons": [{"season_number": number} for number in range(32)]}
-        def catalog(path: str, language: str) -> dict:
+        def catalog(path: str, language: str, db=None) -> dict:
             """Return all requested season objects in one response."""
             seasons = path.split("?append_to_response=")[1].split(",")
             self.assertLessEqual(len(seasons), 15)
@@ -275,7 +276,7 @@ class ProgressApiContracts(TestCase):
                 self.assertEqual(response.status_code, 204)
         for call in self.db.execute.call_args_list:
             sql = call.args[0].compile(dialect=postgresql.dialect())
-            self.assertIn("ON CONFLICT DO NOTHING", str(sql))
+            self.assertIn("ON CONFLICT", str(sql))
             self.assertEqual(sql.params["user_id"], self.owner)
             if "episode_number" in sql.params:
                 self.assertEqual(sql.params["episode_number"], 3)
@@ -299,9 +300,16 @@ class ProgressApiContracts(TestCase):
         self.authenticate()
         row = SimpleNamespace(caught_up_through=date(2026, 10, 1))
         self.db.scalar.return_value = row
-        for _ in range(2):
-            self.assertEqual(self.client.put("/api/v1/up-next/shows/42/caught-up", json={"through": "2026-10-10"}).status_code, 204)
-            self.assertEqual(row.caught_up_through, date(2026, 10, 10))
+        with patch.object(service, "metadata", return_value={}), patch.object(service, "regular_episodes", return_value=[
+            service.EpisodeRef(season_number=1, episode_number=1, name="Old", air_date=date(2026, 10, 2)),
+            service.EpisodeRef(season_number=1, episode_number=2, name="Later", air_date=date(2026, 10, 11)),
+        ]):
+            for _ in range(2):
+                self.assertEqual(self.client.put("/api/v1/up-next/shows/42/caught-up", json={"through": "2026-10-10"}).status_code, 204)
+        self.assertEqual(row.caught_up_through, date(2026, 10, 1))
+        sql = self.db.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+        self.assertEqual(sql.params["episode_number_m0"], 1)
+        self.assertNotIn("episode_number_m1", sql.params)
         self.assertEqual(self.client.put("/api/v1/up-next/shows/42/caught-up", json={"through": "2999-01-01"}).status_code, 422)
 
     def test_season_marks_only_verified_released_episodes_through_submitted_date(self) -> None:
@@ -356,15 +364,48 @@ class ProgressApiContracts(TestCase):
         """Details can read partial progress with no whole-show history prerequisite."""
         self.authenticate()
         self.db.scalar.return_value = SimpleNamespace(caught_up_through=date.min)
-        self.db.scalars.return_value.all.return_value = [SimpleNamespace(season_number=2, episode_number=1)]
+        self.db.scalars.return_value.all.return_value = [SimpleNamespace(season_number=2, episode_number=1, watched=True)]
         episodes = [service.EpisodeRef(season_number=season, episode_number=1, name="Episode", air_date=day) for season, day in [(1, date(2020, 1, 1)), (2, date(2020, 1, 2)), (3, date(2999, 1, 1))]]
-        with patch.object(service, "metadata", return_value={}), patch.object(service, "regular_episodes", return_value=episodes):
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/shows/{tmdb_id}/progress")
+        with patch.object(service, "metadata", return_value={}), patch.object(service, "regular_episodes", return_value=episodes), patch.dict(endpoint.__globals__, {"action_states": MagicMock(return_value=[])}):
             response = self.client.get("/api/v1/up-next/shows/42/progress")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "private, no-store")
         self.assertEqual(response.json()["user_id"], str(self.owner))
         self.assertEqual([ep["watched"] for ep in response.json()["episodes"]], [False, True])
         self.db.execute.assert_not_called()
+
+    def test_refresh_requires_owner_and_returns_accepted_without_history_writes(self) -> None:
+        """Explicit refresh schedules public jobs; GET remains the polling endpoint."""
+        self.authenticate()
+        refresh = MagicMock()
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/refresh")
+        with patch.dict(endpoint.__globals__, {"refresh_owner_catalogs": refresh}):
+            self.assertEqual(self.client.post("/api/v1/up-next/refresh?language=fr-FR").status_code, 202)
+            refresh.assert_called_once_with(self.db, self.owner, "fr-FR")
+            self.client.headers["X-Scenario-Owner"] = str(uuid4())
+            self.assertEqual(self.client.post("/api/v1/up-next/refresh").status_code, 403)
+            self.assertEqual(refresh.call_count, 1)
+        self.db.execute.assert_not_called()
+
+    def test_ordered_intents_require_owner_strict_targets_and_return_private_receipts(self) -> None:
+        """A cold catalogue never weakens authentication or accepts client air dates."""
+        self.authenticate()
+        endpoint = next(route.endpoint for route in router.routes if route.path == "/shows/{tmdb_id}/actions")
+        body = dict(id=str(uuid4()), season_number=1, episode_number=2, through="2026-01-01", watched=True)
+        from app.schemas.up_next import ProgressActionState
+        submit = MagicMock(return_value=ProgressActionState(**body, status="pending"))
+        with patch.dict(endpoint.__globals__, {"submit_action": submit}):
+            response = self.client.put("/api/v1/up-next/shows/42/actions", json=body)
+            self.assertEqual(response.status_code, 202)
+            self.assertEqual(response.headers["cache-control"], "private, no-store")
+            self.assertEqual(response.json()["status"], "pending")
+            self.assertEqual(submit.call_args.args[:3], (self.db, self.owner, 42))
+            for invalid in [dict(body, season_number=0), dict(body, season_number=None), dict(body, watched="true"), dict(body, air_date="2020-01-01"), dict(body, user_id=str(self.owner))]:
+                self.assertEqual(self.client.put("/api/v1/up-next/shows/42/actions", json=invalid).status_code, 422)
+            self.client.headers["X-Scenario-Owner"] = str(uuid4())
+            self.assertEqual(self.client.put("/api/v1/up-next/shows/42/actions", json=body).status_code, 403)
+            self.assertEqual(submit.call_count, 1)
 
     def test_exclude_and_restore_are_idempotent_owner_bound_preferences_only(self) -> None:
         """No view, bookmark, cutoff or episode record is mutated by exclusions."""
@@ -399,32 +440,23 @@ class ProgressApiContracts(TestCase):
 
 
 class MetadataContracts(TestCase):
-    """Cache public information only, bounded by TTL/size and locale."""
+    """Persist public information only and forbid accidental inline fetches."""
 
     def test_cache_reuses_public_metadata_by_locale_and_expires(self) -> None:
         """No account identifier is part of cached source data or its cache key."""
-        with patch.dict(service._metadata, {}, clear=True), patch.object(service, "TmdbService") as client:
-            client.return_value.get_release_details.return_value = {"id": 42}
-            service.metadata("/tv/42", "en-US")
-            service.metadata("/tv/42", "en-US")
-            service.metadata("/tv/42", "fr-FR")
-            self.assertEqual(client.return_value.get_release_details.call_count, 2)
-            service._metadata[("/tv/42", "en-US")] = (0, {"id": 42})
-            service.metadata("/tv/42", "en-US")
-            self.assertEqual(client.return_value.get_release_details.call_count, 3)
+        db = MagicMock()
+        with patch.object(service, "stored_metadata", return_value={"id": 42}) as stored:
+            service.metadata("/tv/42", "en-US", db)
+            service.metadata("/tv/42", "fr-FR", db)
+        self.assertEqual(stored.call_args_list[0].args, (db, "/tv/42", "en-US"))
+        self.assertEqual(stored.call_args_list[1].args, (db, "/tv/42", "fr-FR"))
 
     def test_failed_request_is_not_cached_and_storage_stays_bounded(self) -> None:
         """Retry can actually contact TMDB after failure without unbounded cache growth."""
-        with patch.dict(service._metadata, {}, clear=True), patch.object(service, "TmdbService") as client:
-            client.return_value.get_release_details.side_effect = RuntimeError("unavailable")
+        with patch.object(service, "stored_metadata") as stored:
             with self.assertRaises(RuntimeError):
                 service.metadata("/tv/42", "en-US")
-            self.assertEqual(service._metadata, {})
-            client.return_value.get_release_details.side_effect = None
-            client.return_value.get_release_details.return_value = {"id": 42}
-            for number in range(1030):
-                service.metadata(f"/tv/{number}", "en-US")
-            self.assertEqual(len(service._metadata), 1024)
+            stored.assert_not_called()
 
     def test_cors_allows_identity_guard_for_existing_approved_origin(self) -> None:
         """Cross-origin credentialed PUTs can carry the new identity-change guard."""
@@ -487,7 +519,7 @@ class MigrationContracts(TestCase):
         db.execute.assert_not_called()
         db.scalar.return_value = None
         delete_view(row.id, SimpleNamespace(id=owner), db)
-        self.assertEqual(db.execute.call_count, 2)
+        self.assertEqual(db.execute.call_count, 3)
         for call in db.execute.call_args_list:
             sql = call.args[0].compile(dialect=postgresql.dialect())
             self.assertEqual(sql.params["user_id_1"], owner)

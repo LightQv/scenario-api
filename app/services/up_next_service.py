@@ -1,10 +1,6 @@
 """Combine owner-scoped progress with cached public TMDB release metadata."""
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
-from functools import partial
-from threading import Lock
-from time import monotonic
 from typing import Any, TypeAlias
 from uuid import UUID
 
@@ -13,18 +9,18 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, Watchlist
+from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, View, Watchlist
 from app.schemas.up_next import (
     ExcludedShow, EpisodeRef, EpisodeWatched, NextEntry, NextFeed,
     ShowExclusionRequest, ShowProgressState, WatchedEpisodeState,
 )
-from app.services.tmdb_service import TmdbService
+from app.services.release_catalog_service import CatalogPending, preload_catalogs, stored_metadata
 
-# Only public metadata is cached. Private feeds/progress never enter this cache.
-_metadata: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
-_cache_lock: Lock = Lock()
-_workers: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=6)
-TitleSource: TypeAlias = tuple[str, int, date | None, frozenset[tuple[int, int]]]
+EpisodeKeys: TypeAlias = frozenset[tuple[int, int]]
+TitleSource: TypeAlias = (
+    tuple[str, int, date | None, EpisodeKeys]
+    | tuple[str, int, date | None, EpisodeKeys, EpisodeKeys]
+)
 TitleResult: TypeAlias = tuple[NextEntry | None, NextEntry | None, NextEntry | None]
 
 
@@ -33,21 +29,11 @@ def utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def metadata(path: str, language: str) -> dict[str, Any]:
-    """Fetch bounded, hour-cached public metadata, never caching failed requests."""
-    key: tuple[str, str] = (path, language)
-    with _cache_lock:
-        cached = _metadata.get(key)
-        if cached and cached[0] > monotonic():
-            return cached[1]
-    result: dict[str, Any] = TmdbService().get_release_details(path, language)
-    if not isinstance(result, dict):
-        raise RuntimeError("Invalid TMDB release details")
-    with _cache_lock:
-        if len(_metadata) >= 1024:
-            _metadata.pop(next(iter(_metadata)))
-        _metadata[key] = (monotonic() + 3600, result)
-    return result
+def metadata(path: str, language: str, db: Session | None = None) -> dict[str, Any]:
+    """Read persisted public metadata; upstream retrieval is forbidden on this path."""
+    if db is None:
+        raise RuntimeError("A catalogue database session is required")
+    return stored_metadata(db, path, language)
 
 
 def parsed_date(value: Any) -> date | None:
@@ -59,7 +45,7 @@ def parsed_date(value: Any) -> date | None:
 
 
 def regular_episodes(
-    details: dict[str, Any], tmdb_id: int, language: str,
+    details: dict[str, Any], tmdb_id: int, language: str, db: Session | None = None,
 ) -> list[EpisodeRef]:
     """Batch regular seasons below TMDB's 20-append limit; omit specials/unknown dates."""
     episodes: dict[tuple[int, int], EpisodeRef] = {}
@@ -76,7 +62,7 @@ def regular_episodes(
         batch: list[int] = seasons[start:start + 15]
         appended: str = ",".join(f"season/{number}" for number in batch)
         catalog: dict[str, Any] = metadata(
-            f"/tv/{tmdb_id}?append_to_response={appended}", language,
+            f"/tv/{tmdb_id}?append_to_response={appended}", language, db,
         )
         for number in batch:
             data: Any = catalog.get(f"season/{number}")
@@ -100,11 +86,12 @@ def regular_episodes(
 
 def build_title(
     source: TitleSource,
-    language: str, today: date,
+    language: str, today: date, db: Session | None = None,
 ) -> TitleResult:
     """Calculate released progress and the next announced regular release."""
-    media_type, tmdb_id, cutoff, watched = source
-    details: dict[str, Any] = metadata(f"/{media_type}/{tmdb_id}", language)
+    media_type, tmdb_id, cutoff, watched = source[:4]
+    unwatched: EpisodeKeys = source[4] if len(source) == 5 else frozenset()
+    details: dict[str, Any] = metadata(f"/{media_type}/{tmdb_id}", language, db)
     base: dict[str, Any] = dict(
         tmdb_id=tmdb_id, media_type=media_type,
         title=details.get("title") or details.get("name") or "",
@@ -118,7 +105,7 @@ def build_title(
             NextEntry(**base, date=release) if release and release > today else None
         )
         return None, premiere, None
-    episodes: list[EpisodeRef] = regular_episodes(details, tmdb_id, language)
+    episodes: list[EpisodeRef] = regular_episodes(details, tmdb_id, language, db)
     future: list[EpisodeRef] = sorted(
         (ep for ep in episodes if ep.air_date > today),
         key=lambda ep: (ep.air_date, ep.season_number, ep.episode_number),
@@ -133,8 +120,9 @@ def build_title(
     aired: list[EpisodeRef] = [ep for ep in episodes if ep.air_date <= today]
     missing: list[EpisodeRef] = [
         ep for ep in aired
-        if ep.air_date > cutoff
-        and (ep.season_number, ep.episode_number) not in watched
+        if (ep.season_number, ep.episode_number) in unwatched or (
+            ep.air_date > cutoff and (ep.season_number, ep.episode_number) not in watched
+        )
     ]
     progress: dict[str, int] = dict(
         remaining=len(missing), watched_episodes=len(aired) - len(missing),
@@ -156,26 +144,18 @@ def build_title(
 
 
 def safe_title(
-    source: TitleSource, language: str, today: date,
+    source: TitleSource, language: str, today: date, db: Session | None = None,
 ) -> TitleResult | None:
     """Isolate a metadata failure without manufacturing an empty or caught-up show."""
     try:
-        return build_title(source, language, today)
+        return build_title(source, language, today, db)
     except (RuntimeError, ValueError, KeyError, TypeError):
-        # Do not retain an incomplete appended response for the entire TTL.
-        prefix: str = f"/{source[0]}/{source[1]}"
-        with _cache_lock:
-            for key in list(_metadata):
-                path, cached_language = key
-                if cached_language == language and (
-                    path == prefix or path.startswith((prefix + "?", prefix + "/"))
-                ):
-                    del _metadata[key]
         return None
 
 
 def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
     """Read private sources in one session, then hydrate public metadata in bounded workers."""
+    db.info.pop("release_catalog_reads", None)
     today: date = utc_today()
     progress = db.scalars(select(ShowProgress).where(
         ShowProgress.user_id == user_id,
@@ -184,12 +164,15 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
         EpisodeProgress.user_id == user_id,
     )).all()
     watched: dict[int, set[tuple[int, int]]] = {}
+    unwatched: dict[int, set[tuple[int, int]]] = {}
     for row in explicit:
-        watched.setdefault(row.tmdb_id, set()).add((row.season_number, row.episode_number))
+        target = watched if getattr(row, "watched", True) else unwatched
+        target.setdefault(row.tmdb_id, set()).add((row.season_number, row.episode_number))
     sources: dict[tuple[str, int], TitleSource] = {
         ("tv", row.tmdb_id): (
             "tv", row.tmdb_id, row.caught_up_through,
             frozenset(watched.get(row.tmdb_id, set())),
+            frozenset(unwatched.get(row.tmdb_id, set())),
         )
         for row in progress
     }
@@ -210,13 +193,13 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
     ).order_by(ShowExclusion.title, ShowExclusion.tmdb_id)).all()
     for row in exclusions:
         sources.pop(("tv", row.tmdb_id), None)
+    preload_catalogs(db, list(sources), language)
     feed: NextFeed = NextFeed(
         user_id=user_id, as_of=today, to_watch=[], upcoming=[], caught_up=[],
         excluded=[ExcludedShow.model_validate(row) for row in exclusions],
     )
-    results = _workers.map(
-        partial(safe_title, language=language, today=today), sources.values(),
-    )
+    # Database-only reads: never share a request session with executor threads.
+    results = (safe_title(source, language, today, db) for source in sources.values())
     for result in results:
         if result is None:
             feed.unavailable += 1
@@ -237,6 +220,18 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
     ))
     feed.caught_up.sort(key=lambda item: (item.date or date.max, item.title, item.tmdb_id))
     feed.finished.sort(key=lambda item: (item.title, item.tmdb_id))
+    reads = db.info.get("release_catalog_reads", {}).values()
+    now: datetime = datetime.now(timezone.utc)
+    dates: list[datetime] = [
+        row.updated_at for row in reads
+        if row is not None and row.updated_at is not None
+    ]
+    feed.updated_at = min(dates) if dates else None
+    feed.syncing = any(
+        row is None or (row.failed_at is None and row.next_refresh_at <= now)
+        or row.leased_until is not None for row in reads
+    )
+    feed.sync_failed = any(row is not None and row.failed_at is not None for row in reads)
     return feed
 
 
@@ -255,11 +250,16 @@ def initialize_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:
 
 def show_progress(db: Session, user_id: UUID, tmdb_id: int) -> ShowProgressState:
     """Read released episode states without creating progress or assuming history."""
+    db.info.pop("release_catalog_reads", None)
     today: date = utc_today()
+    ready: bool = True
     try:
         episodes: list[EpisodeRef] = regular_episodes(
-            metadata(f"/tv/{tmdb_id}", "en-US"), tmdb_id, "en-US",
+            metadata(f"/tv/{tmdb_id}", "en-US", db), tmdb_id, "en-US", db,
         )
+    except CatalogPending:
+        ready = False
+        episodes = []
     except (RuntimeError, ValueError, KeyError, TypeError) as error:
         raise HTTPException(503, "Episode metadata unavailable; try again") from error
     progress: ShowProgress | None = db.scalar(select(ShowProgress).where(
@@ -268,23 +268,30 @@ def show_progress(db: Session, user_id: UUID, tmdb_id: int) -> ShowProgressState
     rows: list[EpisodeProgress] = list(db.scalars(select(EpisodeProgress).where(
         EpisodeProgress.user_id == user_id, EpisodeProgress.tmdb_id == tmdb_id,
     )).all())
-    watched: set[tuple[int, int]] = {(row.season_number, row.episode_number) for row in rows}
+    overrides: dict[tuple[int, int], bool] = {
+        (row.season_number, row.episode_number): row.watched for row in rows
+    }
     return ShowProgressState(
         user_id=user_id, tmdb_id=tmdb_id, as_of=today, tracked=progress is not None,
         episodes=[WatchedEpisodeState(
             season_number=ep.season_number, episode_number=ep.episode_number,
-            watched=progress is not None and (
-                ep.air_date <= progress.caught_up_through
-                or (ep.season_number, ep.episode_number) in watched
+            air_date=ep.air_date,
+            watched=progress is not None and overrides.get(
+                (ep.season_number, ep.episode_number), ep.air_date <= progress.caught_up_through,
             ),
         ) for ep in episodes if ep.air_date <= today],
+        ready=ready, syncing=not ready,
+        updated_at=next((
+            row.updated_at for row in db.info.get("release_catalog_reads", {}).values()
+            if row is not None
+        ), None),
     )
 
 
 def start_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:
     """Verify the show before creating an empty, idempotent tracking baseline."""
     try:
-        details: dict[str, Any] = metadata(f"/tv/{tmdb_id}", "en-US")
+        details: dict[str, Any] = metadata(f"/tv/{tmdb_id}", "en-US", db)
         if details.get("id") != tmdb_id:
             raise RuntimeError("Invalid show identity")
     except RuntimeError as error:
@@ -294,12 +301,13 @@ def start_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:
 
 
 def mark_season(
-    db: Session, user_id: UUID, tmdb_id: int, season_number: int, through: date,
+    db: Session, user_id: UUID, tmdb_id: int, season_number: int, through: date, watched: bool = True,
+    *, commit: bool = True,
 ) -> None:
     """Mark only this season's released episodes through the displayed UTC date."""
     if through > utc_today():
         raise HTTPException(422, "Cannot mark future episodes watched")
-    episodes: list[dict[str, Any]] = season_catalog(tmdb_id, season_number)
+    episodes: list[dict[str, Any]] = season_catalog(tmdb_id, season_number, db)
     released: set[int] = set()
     for episode in episodes:
         number: Any = episode.get("episode_number")
@@ -310,19 +318,27 @@ def mark_season(
     if not released:
         raise HTTPException(422, "No released regular episodes in this season")
     initialize_tracking(db, user_id, tmdb_id)
-    db.execute(insert(EpisodeProgress).values([
+    statement = insert(EpisodeProgress).values([
         dict(
             user_id=user_id, tmdb_id=tmdb_id, season_number=season_number,
-            episode_number=number,
+            episode_number=number, watched=watched,
         ) for number in sorted(released)
-    ]).on_conflict_do_nothing())
-    db.commit()
+    ])
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[
+            EpisodeProgress.user_id, EpisodeProgress.tmdb_id,
+            EpisodeProgress.season_number, EpisodeProgress.episode_number,
+        ],
+        set_={"watched": statement.excluded.watched},
+    ))
+    if commit:
+        db.commit()
 
 
-def season_catalog(tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
+def season_catalog(tmdb_id: int, season_number: int, db: Session | None = None) -> list[dict[str, Any]]:
     """Verify a complete season before any progress is written."""
     try:
-        season: dict[str, Any] = metadata(f"/tv/{tmdb_id}/season/{season_number}", "en-US")
+        season: dict[str, Any] = metadata(f"/tv/{tmdb_id}/season/{season_number}", "en-US", db)
     except RuntimeError as error:
         raise HTTPException(503, "Episode metadata unavailable; try again") from error
     episodes: Any = season.get("episodes")
@@ -331,35 +347,105 @@ def season_catalog(tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
     return episodes
 
 
-def mark_episode(db: Session, user_id: UUID, tmdb_id: int, episode: EpisodeWatched) -> None:
+def mark_episode(db: Session, user_id: UUID, tmdb_id: int, episode: EpisodeWatched, *, commit: bool = True, through: date | None = None) -> None:
     """Mark one verified aired episode, starting tracking without assuming its neighbors."""
-    season_episodes: list[dict[str, Any]] = season_catalog(tmdb_id, episode.season_number)
+    season_episodes: list[dict[str, Any]] = season_catalog(tmdb_id, episode.season_number, db)
     match: dict[str, Any] | None = next((
         item for item in season_episodes
         if item.get("episode_number") == episode.episode_number
     ), None)
     air_date: date | None = parsed_date(match.get("air_date")) if match else None
-    if not air_date or air_date > utc_today():
+    if not air_date or air_date > min(through or utc_today(), utc_today()):
         raise HTTPException(422, "Only released regular episodes can be marked watched")
     initialize_tracking(db, user_id, tmdb_id)
-    db.execute(insert(EpisodeProgress).values(
+    statement = insert(EpisodeProgress).values(
         user_id=user_id, tmdb_id=tmdb_id, season_number=episode.season_number,
-        episode_number=episode.episode_number,
-    ).on_conflict_do_nothing())
-    db.commit()
+        episode_number=episode.episode_number, watched=episode.watched,
+    )
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[
+            EpisodeProgress.user_id, EpisodeProgress.tmdb_id,
+            EpisodeProgress.season_number, EpisodeProgress.episode_number,
+        ],
+        set_={"watched": statement.excluded.watched},
+    ))
+    if commit:
+        db.commit()
 
 
-def catch_up(db: Session, user_id: UUID, tmdb_id: int, through: date) -> None:
-    """Mark released regular episodes caught up using an explicit, retry-stable cutoff."""
+def mark_show(
+    db: Session, user_id: UUID, tmdb_id: int, through: date, watched: bool,
+    record_history: bool = False,
+    *, commit: bool = True,
+) -> None:
+    """Set released children; only the explicit show-details action also changes history.
+
+    Args:
+        db: Request transaction, shared by the atomic history/progress update.
+        user_id: Cookie-authenticated owner.
+        tmdb_id: Public show identity verified by the catalogue worker.
+        through: Displayed UTC cutoff, never the eventual retry date.
+        watched: Desired state, not a toggle evaluated again on retry.
+        record_history: Preserve whole-show watched UX; child/feed actions never set this.
+    """
     if through > utc_today():
-        raise HTTPException(422, "Cannot mark future episodes watched")
-    progress = db.scalar(select(ShowProgress).where(
+        raise HTTPException(422, "Cannot mark future episodes")
+    try:
+        details: dict[str, Any] = metadata(f"/tv/{tmdb_id}", "en-US", db)
+        episodes: list[EpisodeRef] = regular_episodes(details, tmdb_id, "en-US", db)
+    except RuntimeError as error:
+        raise HTTPException(503, "Release catalogue unavailable; try again") from error
+    released: list[EpisodeRef] = [episode for episode in episodes if episode.air_date <= through]
+    if not released:
+        raise HTTPException(422, "No released regular episodes")
+    if record_history and watched and (
+        type(details.get("number_of_episodes")) is not int or details["number_of_episodes"] < 0
+        or not isinstance(details.get("name"), str) or not details["name"]
+    ):
+        raise HTTPException(422, "Incomplete show history metadata")
+    initialize_tracking(db, user_id, tmdb_id)
+    # Serialize explicit whole-show actions before checking/creating history.
+    db.scalar(select(ShowProgress).where(
         ShowProgress.user_id == user_id, ShowProgress.tmdb_id == tmdb_id,
     ).with_for_update())
-    if progress is None:
-        raise HTTPException(404, "Tracked show not found")
-    progress.caught_up_through = max(progress.caught_up_through, through)
-    db.commit()
+    if record_history:
+        history_scope = (
+            View.viewer_id == user_id, View.tmdb_id == tmdb_id,
+            View.media_type == "tv",
+        )
+        if not watched:
+            db.execute(delete(View).where(*history_scope))
+        elif db.scalar(select(View.id).where(*history_scope).limit(1)) is None:
+            first_air: str = details.get("first_air_date") or ""
+            genre_ids: list[int] = [
+                genre["id"] for genre in details.get("genres", [])
+                if isinstance(genre, dict) and type(genre.get("id")) is int
+                and genre["id"] != 0
+            ]
+            db.add(View(
+                viewer_id=user_id, tmdb_id=tmdb_id, media_type="tv",
+                recorded_at=datetime.now(timezone.utc), title=details["name"],
+                poster_path=details.get("poster_path") or "",
+                backdrop_path=details.get("backdrop_path") or "",
+                release_date=first_air, release_year=first_air[:4],
+                runtime=details["number_of_episodes"], genre_ids=[0, *genre_ids],
+            ))
+    statement = insert(EpisodeProgress).values([
+        dict(
+            user_id=user_id, tmdb_id=tmdb_id, season_number=ep.season_number,
+            episode_number=ep.episode_number, watched=watched,
+        )
+        for ep in released
+    ])
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[
+            EpisodeProgress.user_id, EpisodeProgress.tmdb_id,
+            EpisodeProgress.season_number, EpisodeProgress.episode_number,
+        ],
+        set_={"watched": statement.excluded.watched},
+    ))
+    if commit:
+        db.commit()
 
 
 def exclude_show(

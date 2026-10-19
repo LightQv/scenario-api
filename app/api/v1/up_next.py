@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_database
 from app.models import User
-from app.schemas.up_next import CaughtUpRequest, EpisodeWatched, NextFeed, ShowExclusionRequest, ShowProgressState
-from app.services.up_next_service import catch_up, exclude_show, mark_episode, release_feed, restore_show, show_progress, start_tracking, mark_season
+from app.schemas.up_next import CaughtUpRequest, EpisodeWatched, NextFeed, ShowExclusionRequest, ShowProgressState, ProgressActionRequest, ProgressActionState
+from app.services.progress_action_service import action_states, submit_action
+from app.services.up_next_service import exclude_show, mark_episode, release_feed, restore_show, show_progress, start_tracking, mark_season, mark_show
+from app.services.release_catalog_service import refresh_owner_catalogs
 
 router = APIRouter(
     tags=["Up next"],
@@ -57,6 +59,21 @@ def get_feed(
     return release_feed(database_session, current_user.id, language)
 
 
+@router.post(
+    "/refresh", status_code=202, response_model=None,
+    summary="Queue a deduplicated background release refresh",
+)
+def refresh_feed(
+    response: Response,
+    language: Literal["en-US", "fr-FR"] = "en-US",
+    current_user: User = Depends(mutation_owner),
+    database_session: Session = Depends(get_database),
+) -> None:
+    """Queue public catalogue work only; keep the last complete feed readable."""
+    response.headers["Cache-Control"] = "private, no-store"
+    refresh_owner_catalogs(database_session, current_user.id, language)
+
+
 @router.put(
     "/shows/{tmdb_id}/episodes", status_code=204,
     summary="Mark a released regular episode watched", response_model=None,
@@ -87,7 +104,27 @@ def get_progress(
 ) -> ShowProgressState:
     """Read **only your own** progress, including an untracked show's empty state."""
     response.headers["Cache-Control"] = "private, no-store"
-    return show_progress(database_session, current_user.id, tmdb_id)
+    result: ShowProgressState = show_progress(database_session, current_user.id, tmdb_id)
+    result.actions = action_states(database_session, current_user.id, tmdb_id)
+    result.syncing = result.syncing or any(action.status == "pending" for action in result.actions)
+    return result
+
+
+@router.put(
+    "/shows/{tmdb_id}/actions", status_code=202, response_model=ProgressActionState,
+    summary="Accept an ordered watched intent, even while the catalogue is preparing",
+    responses={409: {"description": "Operation identity reused"}, 422: {"description": "Invalid target or future cutoff"}, 429: {"description": "Inbox limit reached"}},
+)
+def put_progress_action(
+    response: Response,
+    tmdb_id: Annotated[int, Path(gt=0)],
+    body: ProgressActionRequest,
+    current_user: User = Depends(mutation_owner),
+    database_session: Session = Depends(get_database),
+) -> ProgressActionState:
+    """Accept owner-private desired state; validation never trusts client release metadata."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return submit_action(database_session, current_user.id, tmdb_id, body)
 
 
 @router.put(
@@ -117,15 +154,30 @@ def put_season(
     database_session: Session = Depends(get_database),
 ) -> None:
     """Start tracking and record only this season; history/statistics stay unchanged."""
-    mark_season(database_session, current_user.id, tmdb_id, season_number, body.through)
+    mark_season(database_session, current_user.id, tmdb_id, season_number, body.through, body.watched)
+
+
+@router.put(
+    "/shows/{tmdb_id}/watched", status_code=204, response_model=None,
+    summary="Set watched state of all released regular episodes",
+    responses={422: {"description": "No released episodes or future cutoff"}, 503: {"description": "Catalogue not ready"}},
+)
+def put_show_watched(
+    tmdb_id: Annotated[int, Path(gt=0)],
+    body: CaughtUpRequest,
+    current_user: User = Depends(mutation_owner),
+    database_session: Session = Depends(get_database),
+) -> None:
+    """Atomically set released children and preserve explicit whole-show viewing history."""
+    mark_show(database_session, current_user.id, tmdb_id, body.through, body.watched, record_history=True)
 
 
 @router.put(
     "/shows/{tmdb_id}/caught-up", status_code=204, response_model=None,
     summary="Mark released regular episodes watched",
     responses={
-        404: {"description": "Show not tracked"},
         422: {"description": "Future cutoff"},
+        503: {"description": "Catalogue not ready"},
     },
 )
 def put_caught_up(
@@ -134,8 +186,8 @@ def put_caught_up(
     current_user: User = Depends(mutation_owner),
     database_session: Session = Depends(get_database),
 ) -> None:
-    """Advance the authenticated owner's cutoff without rewriting viewing history."""
-    catch_up(database_session, current_user.id, tmdb_id, body.through)
+    """Set released children through the displayed date without rewriting history."""
+    mark_show(database_session, current_user.id, tmdb_id, body.through, body.watched)
 
 
 @router.put(

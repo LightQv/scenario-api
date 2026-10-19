@@ -32,9 +32,10 @@ Core components:
 owner's tracked shows with **PENDING Bookmarks in their SYSTEM watchlist**.
 It returns an owner-labelled, `private, no-store` snapshot with `to_watch`,
 `upcoming`, `caught_up`, `finished`, `as_of` and an explicit metadata-failure count. Custom
-watchlists do not feed this queue. Only public TMDB metadata is cached (one-hour
-TTL, bounded entries and six workers); regular seasons are fetched in append
-batches of at most 15. Air dates do not imply streaming or local availability.
+watchlists do not feed this queue. Public TMDB catalogues are persisted and
+refreshed by a background worker; feed/progress reads and mutations never call
+TMDB inline. Regular seasons are fetched in append batches of at most 15.
+Air dates do not imply streaming or local availability.
 The PWA calls this destination **Next / La suite**, retaining `/up-next` for
 compatibility. Ended/canceled shows are omitted from `caught_up` only after
 their released regular episodes are all watched; unwatched episodes and any
@@ -64,8 +65,10 @@ partial/start-only tracking catches up released episodes too. Removing the final
 that owner's progress for that show.
 
 - `PUT /api/v1/up-next/shows/{tmdb_id}/episodes` accepts positive
-  `{ season_number, episode_number }`, validates the episode's air date against
-  TMDB, and inserts idempotently under a unique owner/show/season/episode key.
+  `{ season_number, episode_number, watched: true|false }`, validates the episode's
+  air date against the published catalogue and upserts the explicit desired state
+  under a unique owner/show/season/episode key. Omitted `watched` defaults to true
+  for older clients. Explicit false overrides inherited whole-show cutoffs.
   A first episode automatically starts tracking with an empty baseline; it never
   assumes earlier episodes/seasons were watched or adds a viewing-history row.
 - `GET /api/v1/up-next/shows/{tmdb_id}/progress` returns an owner-labelled,
@@ -73,12 +76,16 @@ that owner's progress for that show.
 - `PUT /api/v1/up-next/shows/{tmdb_id}/tracking` starts tracking at the empty
   `0001-01-01` cutoff after verifying the show. Replays preserve existing progress.
 - `PUT /api/v1/up-next/shows/{tmdb_id}/seasons/{season_number}` accepts
-  `{ through: YYYY-MM-DD }` from the progress snapshot, verifies the season and
-  marks only its released regular episodes through that day. Unknown/future dates
+  `{ through: YYYY-MM-DD, watched: true|false }` from the progress snapshot,
+  verifies the season and sets only its released regular episodes through that day. Unknown/future dates
   and specials are excluded. It starts tracking without creating history.
-- `PUT /api/v1/up-next/shows/{tmdb_id}/caught-up` accepts `{ through: YYYY-MM-DD }`
-  from the displayed feed; it advances, but never rewinds, the fixed cutoff and
-  rejects future dates. Retrying the same request never uses a newer date.
+- `PUT /api/v1/up-next/shows/{tmdb_id}/watched` accepts the same dated boolean
+  request and atomically sets all released regular children and preserves explicit
+  whole-show history behavior (create once on watch, remove owned TV records on
+  unwatch). `/caught-up` sets progress only, without changing history. Neither
+  slides historical cutoffs. Child-derived parent selection never inserts history.
+- `POST /api/v1/up-next/refresh?language=en-US` queues public catalogue updates
+  and returns 202; subsequent GETs read status/data only, never retrigger the pipeline.
 - All writes require the normal cookie and matching `X-Scenario-Owner` UUID.
   The header only detects stale-account actions; it cannot choose an owner or
   replace authentication. CORS allows it for the existing approved origins.
@@ -94,11 +101,46 @@ history rows, so episode entries never appear in the viewing pages/statistics.
 The direct season/episode tracking extension reuses migration `0018`'s schema;
 do not reseed progress or rerun any migration/backfill to enable it.
 
-For future installations, **apply both additive migrations through `0018` before
+The reversible-progress/persisted-catalogue follow-up is implemented locally,
+not yet deployed. Migration `0019` (`r8s9t0u1v2w3`) defaults existing episode rows
+to `watched=true` and creates `release_catalog` (public data only). It does not
+modify history, statistics or existing cutoffs. The lifespan-managed worker
+discovers tracked shows/system PENDING Bookmarks at startup and hourly in both
+EN/FR. Database leases (`SKIP LOCKED`, 15-minute expiry, fenced publication)
+deduplicate work across API processes. Each consumer fetches one title at a time without
+holding a database connection, then published atomically; failed fetches preserve
+the last good snapshot and back off five minutes. Continuing titles refresh every
+six hours, terminal shows weekly. Manual refresh shares the same jobs and has a
+one-minute completion cooldown. Cold reads queue preparation; warm feed reads
+batch-load catalogues and derive private progress. The feed exposes `syncing`,
+`sync_failed` and `updated_at`; details expose `ready` while preparing.
+
+Migration `0020` (`s9t0u1v2w3x4`) adds owner-private ordered `progress_action`
+receipts and catalogue priority. `PUT /up-next/shows/{id}/actions` accepts an
+operation UUID, regular target (nullable season/episode for whole show), original
+`through` date, desired `watched` boolean and optional `record_history` (default
+true for explicit show actions; Next sends false). Child actions never write
+history regardless of that flag. It returns a private/no-store 202 receipt:
+pending, applied, failed or cancelled. Later explicit legacy history additions
+and final removals cancel older pending intents, preventing worker resurrection.
+Owner-row locking serializes overlapping intents;
+catalogue validation and history/progress writes share the receipt transaction.
+Conflicting reuse of an operation UUID is 409; at most 150 actions may await
+preparation per owner. Progress reads include ordered receipts. Final receipts
+are kept seven days after completion; pending intents survive restarts and are not expired.
+
+Three bounded worker consumers prioritize interactive misses over feed misses
+and scheduled warming. Published snapshots omit irrelevant episode synopses and
+crew lists, reducing request deserialization. The PostgreSQL rehearsal prints a
+reproducible full-vs-compact 60-show/300-episode benchmark; these local timings are
+not evidence of phone/network performance. No real metadata calls run in that test.
+
+For future installations, **apply additive migrations through `0020` before
 running this API version**, with a verified backup and watched writes paused
 across migration/API cutover to prevent old writers creating unseeded views.
 Deploy the compatible API before the PWA. Leave additive tables on code rollback;
-the explicit downgrade discards progress without changing original history.
+the explicit downgrade discards the public cache/negative overrides without
+changing original history. Prefer code rollback retaining the additive schema.
 Do not rerun any historical recording-date backfill for this feature.
 
 Hermetic contracts: `.venv/bin/python -m unittest discover -s contract_tests -v`.

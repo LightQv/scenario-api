@@ -10,6 +10,8 @@ from app.models.user_badge import UserBadge
 from app.models.user_api_token import UserApiToken
 from app.models.episode_progress import ShowProgress, EpisodeProgress
 from app.models.show_exclusion import ShowExclusion
+from app.models.release_catalog import ReleaseCatalog
+from app.models.progress_action import ProgressAction
 
 __all__ = [
     "User",
@@ -25,4 +27,6 @@ __all__ = [
     "ShowProgress",
     "EpisodeProgress",
     "ShowExclusion",
+    "ReleaseCatalog",
+    "ProgressAction",
 ]

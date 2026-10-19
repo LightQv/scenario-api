@@ -16,6 +16,7 @@ from app.core.middleware import setup_cors
 from app.core.settings import settings
 from app.api.v1.router import main_router
 from app.services.owned_media_scheduler import owned_media_scheduler
+from app.services.release_catalog_scheduler import release_catalog_scheduler
 
 
 @asynccontextmanager
@@ -27,9 +28,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         None: Control to FastAPI while background services are running.
     """
     owned_media_scheduler.start()
+    release_catalog_scheduler.start()
     try:
         yield
     finally:
+        await release_catalog_scheduler.stop()
         await owned_media_scheduler.stop()
 
 # Create the FastAPI application instance

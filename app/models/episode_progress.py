@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, ForeignKeyConstraint, Integer
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, ForeignKeyConstraint, Integer, true
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,7 @@ class EpisodeProgress(Base):
     tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     season_number: Mapped[int] = mapped_column(Integer, primary_key=True)
     episode_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    watched: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
     __table_args__ = (
         ForeignKeyConstraint(
             ["user_id", "tmdb_id"],

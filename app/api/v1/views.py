@@ -7,9 +7,9 @@ from datetime import date, datetime, timezone
 from app.api.dependencies import get_database, get_current_user
 from app.models import User, View
 from app.schemas import ViewCreate, ViewResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
-from app.models import ShowProgress, EpisodeProgress
+from app.models import ShowProgress, EpisodeProgress, ProgressAction
 
 router = APIRouter(
     tags=["Views"],
@@ -122,6 +122,14 @@ def add_view(
             detail="Not authorized to add view for this user",
         )
 
+    if view_data.media_type == "tv":
+        # An explicit later history action supersedes older unvalidated choices.
+        database_session.scalar(select(User.id).where(User.id == current_user.id).with_for_update())
+        database_session.execute(update(ProgressAction).where(
+            ProgressAction.user_id == current_user.id, ProgressAction.tmdb_id == view_data.tmdb_id,
+            ProgressAction.status == "pending",
+        ).values(status="cancelled"))
+
     new_view = View(
         recorded_at=datetime.now(timezone.utc),
         tmdb_id=view_data.tmdb_id,
@@ -195,6 +203,8 @@ def delete_view(
             detail="Not authorized to delete this view",
         )
 
+    if view.media_type == "tv":
+        database_session.scalar(select(User.id).where(User.id == current_user.id).with_for_update())
     database_session.delete(view)
     database_session.flush()
     if view.media_type == "tv" and database_session.scalar(select(View.id).where(
@@ -202,6 +212,10 @@ def delete_view(
         View.media_type == "tv",
     ).limit(1)) is None:
         # Keep tracking while legacy duplicate show views remain.
+        database_session.execute(update(ProgressAction).where(
+            ProgressAction.user_id == current_user.id, ProgressAction.tmdb_id == view.tmdb_id,
+            ProgressAction.status == "pending",
+        ).values(status="cancelled"))
         for model in (EpisodeProgress, ShowProgress):
             database_session.execute(delete(model).where(
                 model.user_id == current_user.id, model.tmdb_id == view.tmdb_id,
