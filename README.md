@@ -93,7 +93,8 @@ that owner's progress for that show.
 Initial release on 2026-10-18 from revision `fea08f8`; the direct season/episode
 tracking and finished-list extension deployed on 2026-10-19 from `6e79d5b`. The
 persistent-catalogue/reversible-progress release deployed later that day from
-`635bb08`, at migration `0020` (`s9t0u1v2w3x4`), without reseeding the 140 initial
+`635bb08`, followed by the notification/HTTPS release `7de3454` at migration
+`0021` (`t0u1v2w3x4y5`), without reseeding the 140 initial
 show-progress cutoffs. The validated database
 backup and previous API image are retained. Existing data fingerprints matched
 across migration; the recording-date backfill was not rerun. See the sibling
@@ -288,7 +289,29 @@ PostgreSQL migration/concurrency/DST/retry/opt-out checks (owned disposable
 database, no configured credentials or real push delivery). Frontend setup,
 isolated Tailscale HTTPS and physical-iPhone acceptance boundaries are documented
 in the sibling PWA's `docs/NOTIFICATIONS.md`. This section describes the
-implementation, not a claim of physical-device acceptance or live release.
+implementation and platform boundaries, not a claim of physical-device acceptance.
+
+The release deployed on 2026-10-19 from `7de3454` after successful
+[API publication 39315357440](https://github.com/LightQv/scenario-api/actions/runs/39315357440)
+and exact-commit frontend checks/publication. Immutable API digest:
+`sha256:ad5f69a9677ec6c20408a54b4527a47f90fb36db7f084245b1225a051b17deac`.
+All 121 tracked application/runtime files matched the image. The production
+backup restored in isolated PostgreSQL with matching fingerprints; migration
+0021 preserved all existing tables and candidate startup preserved private data.
+New tables began empty and notifications remain opt-in. Live HTTPS shell/worker,
+offline guest reload and private-route rejection passed; physical iPhone delivery
+and authenticated settings writes remain user acceptance.
+
+Runtime now uses `https://scenario.tail9c702b.ts.net`, appended to existing CORS
+origins, and `DEBUG=false` for Secure cookies. Both original base Compose files and
+the original API `.env` remain unchanged. **Keep the API candidate override's extra
+`web-push.env` on subsequent recreates/releases**, or Web Push/HTTPS flags revert to
+old defaults. Keys are stable and server-only (mode 600). The retained old API image
+cannot resolve migration 0021: the saved rollback override bypasses its Alembic
+entrypoint and starts the compatible Uvicorn app directly. Retain additive schema;
+do not delete users' notification/progress data just to roll back code. Full receipts
+and restore-tested backup remain in `backups/current-rollback/`; older release
+evidence was archived, not deleted.
 
 ## Setup
 
