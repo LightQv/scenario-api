@@ -91,8 +91,10 @@ that owner's progress for that show.
   replace authentication. CORS allows it for the existing approved origins.
 
 Initial release on 2026-10-18 from revision `fea08f8`; the direct season/episode
-tracking and finished-list extension deployed on 2026-10-19 from `6e79d5b`. Production is at
-migration `0018` with 140 seeded show-progress cutoffs. The validated database
+tracking and finished-list extension deployed on 2026-10-19 from `6e79d5b`. The
+persistent-catalogue/reversible-progress release deployed later that day from
+`635bb08`, at migration `0020` (`s9t0u1v2w3x4`), without reseeding the 140 initial
+show-progress cutoffs. The validated database
 backup and previous API image are retained. Existing data fingerprints matched
 across migration; the recording-date backfill was not rerun. See the sibling
 PWA's `docs/DEPLOYMENT_AUDIT.md` for immutable image identities and verification
@@ -101,8 +103,8 @@ history rows, so episode entries never appear in the viewing pages/statistics.
 The direct season/episode tracking extension reuses migration `0018`'s schema;
 do not reseed progress or rerun any migration/backfill to enable it.
 
-The reversible-progress/persisted-catalogue follow-up is implemented locally,
-not yet deployed. Migration `0019` (`r8s9t0u1v2w3`) defaults existing episode rows
+The reversible-progress/persisted-catalogue follow-up deployed on 2026-10-19.
+Migration `0019` (`r8s9t0u1v2w3`) defaults existing episode rows
 to `watched=true` and creates `release_catalog` (public data only). It does not
 modify history, statistics or existing cutoffs. The lifespan-managed worker
 discovers tracked shows/system PENDING Bookmarks at startup and hourly in both
@@ -149,6 +151,21 @@ Actual PostgreSQL rehearsal:
 `postgres:16-alpine` image with `--pull never`, generated fixtures, tmpfs and a
 loopback-only random port; its owned container is removed afterward. It does
 not read configured database credentials or contact TMDB/production.
+
+Release evidence: API publisher [39297925255](https://github.com/LightQv/scenario-api/actions/runs/39297925255),
+immutable digest `sha256:6ade733edad4cf4a9f687824c1cc5429d735e3d7fc2287be6e22927404e37536`.
+All 115 tracked application/runtime files matched the published image. The 58
+hermetic contracts and PostgreSQL rehearsal passed locally; the existing API
+workflow publishes images but does not run tests. Before migration, the production
+backup was decoded and fully restored in an isolated disposable PostgreSQL 16
+instance with matching data fingerprints. Every existing table's original columns
+matched across migration and candidate verification; old episode rows became
+`watched=true`. History, cutoffs and recording dates were not reseeded/backfilled.
+Production HTTP health, private-route rejection and initial public catalogue
+publication passed; authenticated watched writes and physical iPhone acceptance
+were not used as release probes. The old API image is retained as `api-rollback`;
+retain additive schema during code rollback. Full receipts and the backup are
+under `~/web_app/scenario/api/backups/current-rollback/` on the server.
 
 ### Private viewing insights
 
