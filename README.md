@@ -83,7 +83,8 @@ that owner's progress for that show.
   The header only detects stale-account actions; it cannot choose an owner or
   replace authentication. CORS allows it for the existing approved origins.
 
-Released on 2026-10-18 from application revision `fea08f8`; production is at
+Initial release on 2026-10-18 from revision `fea08f8`; the direct season/episode
+tracking and finished-list extension deployed on 2026-10-19 from `6e79d5b`. Production is at
 migration `0018` with 140 seeded show-progress cutoffs. The validated database
 backup and previous API image are retained. Existing data fingerprints matched
 across migration; the recording-date backfill was not rerun. See the sibling
