@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "contract_tests")]
 from test_notifications import service
 from app.database.base import Base
-from app.models import EpisodeProgress, ShowExclusion, ShowProgress, User, View
+from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, User, View, Watchlist
 from app.models.notification import NotificationDelivery, NotificationPreference, PushSubscription
 from app.models.release_catalog import ReleaseCatalog
 from app.schemas.notification import NotificationSettingsInput
@@ -97,6 +97,12 @@ def run() -> None:
             db.add(ReleaseCatalog(media_type="tv", tmdb_id=42, language="fr-FR", next_refresh_at=now, payload={
                 "id": 42, "name": "Une série privée", "seasons": [{"season_number": 1}], "season/1": {"episodes": [{"episode_number": 1, "air_date": day.isoformat()}]},
             }))
+            db.commit()
+            assert not service.releases_today(db, owner, "fr-FR", day), "A dormant cutoff without watched activity is not a follow"
+            queue = Watchlist(title="Bookmarks", type="SYSTEM", author_id=owner)
+            db.add(queue)
+            db.flush()
+            db.add(Media(watchlist_id=queue.id, type="PENDING", tmdb_id=42, media_type="tv", title="Fixture", poster_path="", backdrop_path="", release_date="2026-10-25", runtime=1, genre_ids=[]))
             db.commit()
             assert service.releases_today(db, owner, "fr-FR", day)
             assert not service.releases_today(db, other, "fr-FR", day)

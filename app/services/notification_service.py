@@ -17,13 +17,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
-from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, User, View, Watchlist
+from app.models import ShowExclusion, User
 from app.models.notification import NotificationDelivery, NotificationPreference, PushSubscription
 from app.models.progress_action import ProgressAction
 from app.models.release_catalog import ReleaseCatalog
 from app.schemas.notification import NotificationSettingsInput, NotificationSettingsState, SubscriptionInput, checked_endpoint
 from app.services.encryption_service import IntegrationSecretCipher
 from app.services.up_next_service import parsed_date
+from app.services.viewing_activity_service import owner_activity, watched_regular_count
 
 
 def available() -> bool:
@@ -216,25 +217,24 @@ def episode_releases_today(payload: dict[str, Any], day: date, cutoff: date, ove
 
 def release_notices_today(db: Session, owner: UUID, language: str, day: date) -> list[ReleaseNotice]:
     """Read eligible owner-bound releases from catalogues, without writes or TMDB."""
-    progress = {row.tmdb_id: row.caught_up_through for row in db.scalars(select(ShowProgress).where(ShowProgress.user_id == owner))}
+    activity = owner_activity(db, owner)
     excluded = set(db.scalars(select(ShowExclusion.tmdb_id).where(ShowExclusion.user_id == owner)))
     pending = set(db.scalars(select(ProgressAction.tmdb_id).where(ProgressAction.user_id == owner, ProgressAction.status == "pending")))
-    overrides: dict[int, dict[tuple[int, int], bool]] = {}
-    for row in db.scalars(select(EpisodeProgress).where(EpisodeProgress.user_id == owner)):
-        overrides.setdefault(row.tmdb_id, {})[(row.season_number, row.episode_number)] = row.watched
-    movies = set(db.scalars(select(Media.tmdb_id).join(Watchlist, Media.watchlist_id == Watchlist.id).where(
-        Watchlist.author_id == owner, Watchlist.type == "SYSTEM", Media.type == "PENDING", Media.media_type == "movie",
-    )))
-    movies -= set(db.scalars(select(View.tmdb_id).where(View.viewer_id == owner, View.media_type == "movie")))
+    movies: set[int] = {number for kind, number in activity.bookmarks - activity.history if kind == "movie"}
+    shows: set[int] = activity.tv_ids()
     # Compact stored catalogues are shared public data; all private selectors above are owner-bound.
     notices: list[ReleaseNotice] = []
     for catalog in db.scalars(select(ReleaseCatalog).where(ReleaseCatalog.language == language, ReleaseCatalog.payload.is_not(None)).order_by(ReleaseCatalog.media_type, ReleaseCatalog.tmdb_id)):
         payload: dict[str, Any] = catalog.payload or {}
         if catalog.media_type == "movie" and catalog.tmdb_id in movies and parsed_date(payload.get("release_date")) == day:
             notices.append({"title": notification_title(payload.get("title") or ("Film" if language == "fr-FR" else "Movie")), "episode": None})
-        if catalog.media_type == "tv" and catalog.tmdb_id in progress and catalog.tmdb_id not in excluded | pending:
+        cutoff: date = activity.cutoffs.get(catalog.tmdb_id, date.min)
+        overrides: dict[tuple[int, int], bool] = activity.overrides.get(catalog.tmdb_id, {})
+        if (catalog.media_type == "tv" and catalog.tmdb_id in shows
+                and catalog.tmdb_id not in excluded | pending and activity.follows_tv(
+                    catalog.tmdb_id, watched_regular_count(payload, cutoff, overrides, day))):
             title: str = notification_title(payload.get("name") or ("Série" if language == "fr-FR" else "TV show"))
-            for season, episode in episode_numbers_today(payload, day, progress[catalog.tmdb_id], overrides.get(catalog.tmdb_id, {})):
+            for season, episode in episode_numbers_today(payload, day, cutoff, overrides):
                 notices.append({"title": title, "episode": f"S{season:02d} E{episode:02d}"})
     return notices
 

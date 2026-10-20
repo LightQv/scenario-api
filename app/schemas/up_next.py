@@ -75,6 +75,29 @@ class EpisodeWatched(BaseModel):
     watched: bool = Field(default=True, strict=True)
 
 
+class ViewedShow(BaseModel):
+    """Derived TV listing row, not a historical View or a statistics input."""
+
+    tmdb_id: int = Field(gt=0)
+    title: str
+    poster_path: str
+    backdrop_path: str
+    release_date: str
+    genre_ids: list[int]
+    watched_episodes: int = Field(ge=0)
+    aired_episodes: int = Field(ge=0)
+    status: Literal["in_progress", "caught_up", "completed"]
+
+
+class ViewedShows(BaseModel):
+    """Cookie-owner-labelled activity projection with honest catalogue failures."""
+
+    user_id: UUID
+    shows: list[ViewedShow]
+    unavailable: int = 0
+    syncing: bool = False
+
+
 class CaughtUpRequest(BaseModel):
     """Freeze bulk progress to the exact date shown in the feed, including on retry."""
 

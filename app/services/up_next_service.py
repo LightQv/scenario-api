@@ -9,12 +9,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import EpisodeProgress, Media, ShowExclusion, ShowProgress, View, Watchlist
+from app.models import EpisodeProgress, ProgressAction, ShowExclusion, ShowProgress, View
 from app.schemas.up_next import (
     ExcludedShow, EpisodeRef, EpisodeWatched, NextEntry, NextFeed,
-    ShowExclusionRequest, ShowProgressState, WatchedEpisodeState,
+    ShowExclusionRequest, ShowProgressState, WatchedEpisodeState, ViewedShow, ViewedShows,
 )
 from app.services.release_catalog_service import CatalogPending, preload_catalogs, stored_metadata
+from app.services.viewing_activity_service import owner_activity
 
 EpisodeKeys: TypeAlias = frozenset[tuple[int, int]]
 TitleSource: TypeAlias = (
@@ -87,6 +88,7 @@ def regular_episodes(
 def build_title(
     source: TitleSource,
     language: str, today: date, db: Session | None = None,
+    *, activity_model: bool = True,
 ) -> TitleResult:
     """Calculate released progress and the next announced regular release."""
     media_type, tmdb_id, cutoff, watched = source[:4]
@@ -97,26 +99,24 @@ def build_title(
         title=details.get("title") or details.get("name") or "",
         poster_path=details.get("poster_path") or "",
         backdrop_path=details.get("backdrop_path") or "",
-        tracked=cutoff is not None, status=details.get("status") or "",
+        tracked=(media_type == "tv" if activity_model else cutoff is not None), status=details.get("status") or "",
     )
     if media_type == "movie":
         release: date | None = parsed_date(details.get("release_date"))
         premiere: NextEntry | None = (
             NextEntry(**base, date=release) if release and release > today else None
         )
-        return None, premiere, None
+        ready_movie: NextEntry | None = NextEntry(**base, date=release) if activity_model and release and release <= today else None
+        return ready_movie, premiere, None
     episodes: list[EpisodeRef] = regular_episodes(details, tmdb_id, language, db)
     future: list[EpisodeRef] = sorted(
         (ep for ep in episodes if ep.air_date > today),
         key=lambda ep: (ep.air_date, ep.season_number, ep.episode_number),
     )
-    if cutoff is None:
-        # Bookmarks are a release queue, never assumed viewing progress.
-        next_release: NextEntry | None = (
-            NextEntry(**base, date=future[0].air_date, episode=future[0])
-            if future else None
-        )
-        return None, next_release, None
+    if not activity_model and cutoff is None:
+        return None, NextEntry(**base, date=future[0].air_date, episode=future[0]) if future else None, None
+    # A bookmark starts at zero, never assuming any episode watched.
+    cutoff = cutoff or date.min
     aired: list[EpisodeRef] = [ep for ep in episodes if ep.air_date <= today]
     missing: list[EpisodeRef] = [
         ep for ep in aired
@@ -137,6 +137,8 @@ def build_title(
             **base, **progress, date=missing[0].air_date, episode=missing[0],
         )
         return ready, upcoming, None
+    if not aired:
+        return None, upcoming, None
     caught_up: NextEntry = NextEntry(
         **base, **progress, date=future[0].air_date if future else None,
     )
@@ -145,49 +147,31 @@ def build_title(
 
 def safe_title(
     source: TitleSource, language: str, today: date, db: Session | None = None,
+    *, activity_model: bool = True,
 ) -> TitleResult | None:
     """Isolate a metadata failure without manufacturing an empty or caught-up show."""
     try:
-        return build_title(source, language, today, db)
+        return build_title(source, language, today, db, activity_model=activity_model)
     except (RuntimeError, ValueError, KeyError, TypeError):
         return None
 
 
-def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
+def release_feed(db: Session, user_id: UUID, language: str, *, activity_model: bool = True) -> NextFeed:
     """Read private sources in one session, then hydrate public metadata in bounded workers."""
     db.info.pop("release_catalog_reads", None)
     today: date = utc_today()
-    progress = db.scalars(select(ShowProgress).where(
-        ShowProgress.user_id == user_id,
-    )).all()
-    explicit = db.scalars(select(EpisodeProgress).where(
-        EpisodeProgress.user_id == user_id,
-    )).all()
-    watched: dict[int, set[tuple[int, int]]] = {}
-    unwatched: dict[int, set[tuple[int, int]]] = {}
-    for row in explicit:
-        target = watched if getattr(row, "watched", True) else unwatched
-        target.setdefault(row.tmdb_id, set()).add((row.season_number, row.episode_number))
+    activity = owner_activity(db, user_id)
     sources: dict[tuple[str, int], TitleSource] = {
-        ("tv", row.tmdb_id): (
-            "tv", row.tmdb_id, row.caught_up_through,
-            frozenset(watched.get(row.tmdb_id, set())),
-            frozenset(unwatched.get(row.tmdb_id, set())),
+        ("tv", number): (
+            "tv", number, activity.cutoffs.get(number),
+            frozenset(key for key, value in activity.overrides.get(number, {}).items() if value),
+            frozenset(key for key, value in activity.overrides.get(number, {}).items() if not value),
         )
-        for row in progress
+        for number in (activity.tv_ids() if activity_model else set(activity.cutoffs) | {number for kind, number in activity.bookmarks if kind == "tv"})
     }
-    bookmarks = db.scalars(
-        select(Media).join(Watchlist, Media.watchlist_id == Watchlist.id).where(
-            Watchlist.author_id == user_id, Watchlist.type == "SYSTEM",
-            Media.type == "PENDING",
-        )
-    ).all()
-    for row in bookmarks:
-        if row.media_type in ("movie", "tv"):
-            sources.setdefault(
-                (row.media_type, row.tmdb_id),
-                (row.media_type, row.tmdb_id, None, frozenset()),
-            )
+    for kind, number in (activity.bookmarks - activity.history if activity_model else activity.bookmarks):
+        if kind == "movie":
+            sources[(kind, number)] = (kind, number, None, frozenset())
     exclusions = db.scalars(select(ShowExclusion).where(
         ShowExclusion.user_id == user_id,
     ).order_by(ShowExclusion.title, ShowExclusion.tmdb_id)).all()
@@ -199,12 +183,15 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
         excluded=[ExcludedShow.model_validate(row) for row in exclusions],
     )
     # Database-only reads: never share a request session with executor threads.
-    results = (safe_title(source, language, today, db) for source in sources.values())
-    for result in results:
+    for source in sources.values():
+        result = safe_title(source, language, today, db, activity_model=activity_model)
         if result is None:
             feed.unavailable += 1
             continue
         next_episode, upcoming, caught_up = result
+        summary: NextEntry | None = next_episode or upcoming or caught_up
+        if activity_model and source[0] == "tv" and not activity.follows_tv(source[1], summary.watched_episodes if summary else 0):
+            continue
         if next_episode:
             feed.to_watch.append(next_episode)
         if upcoming:
@@ -227,12 +214,68 @@ def release_feed(db: Session, user_id: UUID, language: str) -> NextFeed:
         if row is not None and row.updated_at is not None
     ]
     feed.updated_at = min(dates) if dates else None
-    feed.syncing = any(
+    feed.syncing = bool(db.scalar(select(ProgressAction.id).where(
+        ProgressAction.user_id == user_id, ProgressAction.status == "pending",
+    ).limit(1))) or any(
         row is None or (row.failed_at is None and row.next_refresh_at <= now)
         or row.leased_until is not None for row in reads
     )
     feed.sync_failed = any(row is not None and row.failed_at is not None for row in reads)
     return feed
+
+
+def viewed_shows(db: Session, user_id: UUID, language: str) -> ViewedShows:
+    """Project TV viewing activity without inserting synthetic history records.
+
+    Legacy history is kept even when a catalogue is unavailable. Episode-only
+    activity is returned only with verified released watched children; exclusions
+    affect Next, never Viewed. No historical dates/statistics are synthesized.
+    """
+    db.info.pop("release_catalog_reads", None)
+    activity = owner_activity(db, user_id)
+    identities: set[int] = {
+        number for number in activity.tv_ids()
+        if ("tv", number) in activity.history or activity.cutoffs.get(number, date.min) != date.min
+        or any(activity.overrides.get(number, {}).values())
+    }
+    preload_catalogs(db, [("tv", number) for number in identities], language)
+    result: ViewedShows = ViewedShows(user_id=user_id, shows=[])
+    today: date = utc_today()
+    for number in sorted(identities):
+        overrides: dict[tuple[int, int], bool] = activity.overrides.get(number, {})
+        source: TitleSource = (
+            "tv", number, activity.cutoffs.get(number),
+            frozenset(key for key, value in overrides.items() if value),
+            frozenset(key for key, value in overrides.items() if not value),
+        )
+        calculated: TitleResult | None = safe_title(source, language, today, db)
+        if calculated is None:
+            result.unavailable += 1
+            continue
+        summary: NextEntry | None = next((entry for entry in calculated if entry is not None), None)
+        historical: bool = ("tv", number) in activity.history
+        if summary is None or summary.watched_episodes == 0 and not historical:
+            continue
+        details: dict[str, Any] = metadata(f"/tv/{number}", language, db)
+        remaining: int = summary.remaining
+        status: str = "in_progress" if remaining else "caught_up"
+        if not remaining and details.get("status") in ("Ended", "Canceled") and calculated[1] is None:
+            status = "completed"
+        result.shows.append(ViewedShow(
+            tmdb_id=number, title=details.get("name") or "", poster_path=details.get("poster_path") or "",
+            backdrop_path=details.get("backdrop_path") or "", release_date=details.get("first_air_date") or "",
+            genre_ids=[genre["id"] for genre in details.get("genres", []) if isinstance(genre, dict) and type(genre.get("id")) is int],
+            watched_episodes=summary.watched_episodes,
+            aired_episodes=summary.aired_episodes,
+            status=status,
+        ))
+    result.syncing = bool(db.scalar(select(ProgressAction.id).where(
+        ProgressAction.user_id == user_id, ProgressAction.status == "pending",
+    ).limit(1))) or any(
+        row is None or (row.payload is None and row.failed_at is None) or row.leased_until is not None
+        for row in db.info.get("release_catalog_reads", {}).values()
+    )
+    return result
 
 
 def initialize_tracking(db: Session, user_id: UUID, tmdb_id: int) -> None:

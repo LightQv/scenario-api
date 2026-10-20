@@ -170,17 +170,18 @@ class NotificationContracts(TestCase):
         def scalars() -> list[list]:
             return [
                 [SimpleNamespace(tmdb_id=identity, caught_up_through=date.min) for identity in [42, 43, 44]],
-                [43], [44], [SimpleNamespace(tmdb_id=42, season_number=1, episode_number=2, watched=True)],
-                [42, 45], [45],
+                [SimpleNamespace(tmdb_id=42, season_number=1, episode_number=2, watched=True)],
+                [SimpleNamespace(tmdb_id=number, media_type="movie") for number in [42, 45]],
+                [SimpleNamespace(tmdb_id=45, media_type="movie")], [43], [44],
                 [SimpleNamespace(media_type="movie", tmdb_id=42, payload={"title": "Movie 42", "release_date": day.isoformat()}),
                  SimpleNamespace(media_type="movie", tmdb_id=45, payload={"title": "Watched movie", "release_date": day.isoformat()}),
                  tv(42), tv(43), tv(44), tv(99)],
             ]
         db = MagicMock()
-        db.scalars.side_effect = scalars()
+        db.scalars.side_effect = [MagicMock(all=MagicMock(return_value=rows), __iter__=MagicMock(return_value=iter(rows))) for rows in scalars()]
         self.assertEqual(service.release_notices_today(db, owner, "en-US", day), [
             {"title": "Movie 42", "episode": None}, {"title": "Show 42", "episode": "S01 E01"},
         ])
-        db.scalars.side_effect = scalars()
+        db.scalars.side_effect = [MagicMock(all=MagicMock(return_value=rows), __iter__=MagicMock(return_value=iter(rows))) for rows in scalars()]
         self.assertFalse(service.releases_today(db, owner, "en-US", date(2026, 10, 22)))
         db.commit.assert_not_called()

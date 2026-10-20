@@ -159,7 +159,7 @@ def run() -> None:
                 service.exclude_show(db, other, 42, preference)
                 hidden = service.release_feed(db, owner, "en-US")
                 assert hidden.to_watch == [] and len(hidden.excluded) == 1
-                assert [item.media_type for item in hidden.upcoming] == ["movie"]
+                assert hidden.upcoming == []  # Same-ID bookmarked movie already exists in Viewed.
                 assert db.get(ShowProgress, (owner, 42)).caught_up_through == cutoff
                 assert db.scalar(select(func.count()).select_from(EpisodeProgress)) == 1
                 assert db.scalar(select(func.count()).select_from(Media)) == 2
@@ -357,6 +357,9 @@ def run() -> None:
             for number in range(1000, 1060):
                 db.add(ShowProgress(user_id=bench, tmdb_id=number, caught_up_through=date.min))
                 db.add(ReleaseCatalog(media_type="tv", tmdb_id=number, language="en-US", payload=verbose, next_refresh_at=datetime.now(timezone.utc) + timedelta(hours=6)))
+            db.flush()
+            for number in range(1000, 1060):
+                db.add(EpisodeProgress(user_id=bench, tmdb_id=number, season_number=1, episode_number=1, watched=True))
             db.commit()
         timings = {}
         with patch.object(catalogs, "TmdbService", side_effect=AssertionError("Benchmark made upstream call")):

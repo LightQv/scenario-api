@@ -265,6 +265,36 @@ its repair is outside this feature.
 
 ---
 
+### Local viewing-activity follow-up (not deployed)
+
+Updated clients request `GET /api/v1/up-next?activity=true`. Next derives TV
+eligibility from PENDING system Bookmarks, whole-show history or effective watched
+released regular episodes. Empty/negative-only baselines do not keep following a
+show. Bookmarked TV starts at the first released unwatched episode; bookmarked
+unwatched films move from Coming soon to To watch on release. Watched films are
+excluded using full movie/TV identity. Removing the last visible reference stops
+following, without deleting dormant cutoffs/negative overrides or bookmarks.
+Legacy clients omit `activity` and retain their episode-only response contract
+until app activation; the old explicit `/tracking` baseline endpoint is deprecated.
+
+`GET /api/v1/up-next/viewed` is cookie-owner-only, owner-labelled and no-store. It
+projects TV progress/status for legacy history and shows with watched episodes;
+the PWA merges these rows by TV identity without fabricating View rows/dates.
+Exclusions affect Next and notifications, never Viewed. Shared owner-bound source
+selectors also govern release notifications, which still send only on qualifying
+local release days and recheck at send/retry time. Historical statistics,
+achievements/story inputs and existing View records remain unchanged. No new
+migration or historical backfill is needed. Deploy API before PWA; retain the
+existing 0022 additive schema/runtime push overlay and rollback safeguards.
+
+Local checks: 72 hermetic API contracts, targeted Pylint errors-only and disposable
+PostgreSQL progress/notification/activity rehearsals. The new lifecycle rehearsal
+is `.venv/bin/python scripts/test_viewing_activity_postgres.py`; it verifies
+bookmark/episode/season/show/removal transitions, negative overrides, exclusions,
+movie/TV collisions, owner isolation and unchanged original history/statistics
+inputs without configured databases, TMDB or real push transport. These checks do
+not replace a protected production-backup restore rehearsal before deployment.
+
 ### Release notifications (migrations 0021–0022)
 
 Owner-private `/api/v1/notifications` GET/PUT and `/device` PUT/DELETE plus `/test`

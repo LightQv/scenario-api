@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_database
 from app.models import User
-from app.schemas.up_next import CaughtUpRequest, EpisodeWatched, NextFeed, ShowExclusionRequest, ShowProgressState, ProgressActionRequest, ProgressActionState
+from app.schemas.up_next import CaughtUpRequest, EpisodeWatched, NextFeed, ShowExclusionRequest, ShowProgressState, ProgressActionRequest, ProgressActionState, ViewedShows
 from app.services.progress_action_service import action_states, submit_action
-from app.services.up_next_service import exclude_show, mark_episode, release_feed, restore_show, show_progress, start_tracking, mark_season, mark_show
+from app.services.up_next_service import exclude_show, mark_episode, release_feed, restore_show, show_progress, start_tracking, mark_season, mark_show, viewed_shows
 from app.services.release_catalog_service import refresh_owner_catalogs
 
 router = APIRouter(
@@ -47,16 +47,35 @@ def mutation_owner(
 def get_feed(
     response: Response,
     language: Literal["en-US", "fr-FR"] = "en-US",
+    activity: bool = False,
     current_user: User = Depends(get_current_user),
     database_session: Session = Depends(get_database),
 ) -> NextFeed:
     """Return **only the authenticated owner's** progress and release queue.
 
     Season zero is excluded. Air dates are information, not streaming availability.
-    Reading this endpoint never advances progress or writes history.
+    Reading this endpoint never advances progress or writes history. Updated clients
+    request `activity=true`; older installed workers retain the episode-only shape
+    until they activate the app update.
     """
     response.headers["Cache-Control"] = "private, no-store"
-    return release_feed(database_session, current_user.id, language)
+    return release_feed(database_session, current_user.id, language, activity_model=activity)
+
+
+@router.get(
+    "/viewed", response_model=ViewedShows, status_code=200,
+    summary="Read your TV viewing activity, including partial shows",
+    responses={503: {"description": "Activity catalogue unavailable"}},
+)
+def get_viewed_shows(
+    response: Response,
+    language: Literal["en-US", "fr-FR"] = "en-US",
+    current_user: User = Depends(get_current_user),
+    database_session: Session = Depends(get_database),
+) -> ViewedShows:
+    """Return owner-private TV progress without rewriting history or statistics."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return viewed_shows(database_session, current_user.id, language)
 
 
 @router.post(
@@ -130,6 +149,7 @@ def put_progress_action(
 @router.put(
     "/shows/{tmdb_id}/tracking", status_code=204, response_model=None,
     summary="Start tracking without marking any episodes watched",
+    deprecated=True,
     responses={503: {"description": "TMDB unavailable"}},
 )
 def put_tracking(
@@ -137,7 +157,7 @@ def put_tracking(
     current_user: User = Depends(mutation_owner),
     database_session: Session = Depends(get_database),
 ) -> None:
-    """Idempotently follow a show without adding viewing history."""
+    """Retain the legacy empty baseline; activity-model clients follow via Bookmarks."""
     start_tracking(database_session, current_user.id, tmdb_id)
 
 

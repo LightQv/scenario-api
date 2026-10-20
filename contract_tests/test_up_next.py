@@ -27,6 +27,7 @@ from app.api.dependencies import get_current_user, get_database
 from app.api.v1.views import add_view, delete_view
 from app.schemas.up_next import EpisodeWatched
 from app.schemas.view import ViewCreate
+from app.services.viewing_activity_service import OwnerActivity, watched_regular_count
 
 
 class ReleaseContracts(TestCase):
@@ -97,12 +98,14 @@ class ReleaseContracts(TestCase):
         ready, _, _ = service.build_title(("tv", 42, self.today, frozenset()), "en-US", date(2026, 10, 24))
         self.assertEqual((ready.episode.season_number, ready.episode.episode_number), (2, 1))
 
-    def test_bookmark_has_upcoming_but_never_assumed_progress(self) -> None:
+    def test_bookmark_has_ready_and_upcoming_but_never_assumed_progress(self) -> None:
         """Bookmarking a series is not evidence of watched episodes."""
         ready, upcoming, caught = self.build(None)
-        self.assertIsNone(ready)
+        self.assertEqual(ready.episode.episode_number, 1)
+        self.assertEqual(ready.watched_episodes, 0)
+        self.assertEqual(ready.remaining, 3)
         self.assertIsNone(caught)
-        self.assertFalse(upcoming.tracked)
+        self.assertTrue(upcoming.tracked)
 
     def test_missing_season_catalog_is_unavailable_not_caught_up(self) -> None:
         """Partial TMDB append success never manufactures a completed show."""
@@ -122,12 +125,14 @@ class ReleaseContracts(TestCase):
             self.assertEqual(service.regular_episodes(details, 42, "en-US"), [])
             self.assertEqual(request.call_count, 3)
 
-    def test_movies_use_current_metadata_and_pass_after_release(self) -> None:
-        """A bookmarked movie leaves the forward-only feed after its release day."""
+    def test_movies_move_from_upcoming_to_ready_on_release(self) -> None:
+        """A bookmarked unwatched movie stays actionable after release day."""
         _, upcoming, _ = service.build_title(("movie", 42, None, frozenset()), "fr-FR", self.today)
         self.assertEqual(upcoming.date, date(2026, 11, 6))
-        _, upcoming, _ = service.build_title(("movie", 42, None, frozenset()), "fr-FR", date(2026, 11, 6))
+        ready, upcoming, _ = service.build_title(("movie", 42, None, frozenset()), "fr-FR", date(2026, 11, 6))
         self.assertIsNone(upcoming)
+        self.assertEqual(ready.media_type, "movie")
+        self.assertIsNone(ready.episode)
 
     def test_feed_owner_predicates_bookmark_scope_deduplication_and_partial_failure(self) -> None:
         """No themed-list source, ID collision, private cache or write on a feed read."""
@@ -136,8 +141,9 @@ class ReleaseContracts(TestCase):
         db.scalars.return_value.all.side_effect = [
             [SimpleNamespace(tmdb_id=42, caught_up_through=date(2026, 10, 1))], [],
             [SimpleNamespace(tmdb_id=42, media_type="tv"), SimpleNamespace(tmdb_id=42, media_type="movie"), SimpleNamespace(tmdb_id=99, media_type="tv")],
-            [],
+            [], [],
         ]
+        db.scalar.return_value = None
         with patch.object(service, "utc_today", return_value=self.today):
             feed = service.release_feed(db, owner, "fr-FR")
         self.assertEqual(len(feed.to_watch), 1)
@@ -173,8 +179,10 @@ class ReleaseContracts(TestCase):
         db.scalars.return_value.all.side_effect = [
             [SimpleNamespace(tmdb_id=42, caught_up_through=self.today)], [],
             [SimpleNamespace(tmdb_id=42, media_type="tv"), SimpleNamespace(tmdb_id=42, media_type="movie")],
+            [],
             [SimpleNamespace(tmdb_id=42, title="Paused show", poster_path="/poster.jpg")],
         ]
+        db.scalar.return_value = None
         with patch.object(service, "utc_today", return_value=self.today):
             feed = service.release_feed(db, owner, "en-US")
         self.assertEqual(feed.to_watch, [])
@@ -189,7 +197,8 @@ class ReleaseContracts(TestCase):
         """Ended caught-up titles remain consultable, with future releases retained."""
         self.details["status"] = "Ended"
         db = MagicMock()
-        db.scalars.return_value.all.side_effect = [[SimpleNamespace(tmdb_id=42, caught_up_through=self.today)], [], [], []]
+        db.scalars.return_value.all.side_effect = [[SimpleNamespace(tmdb_id=42, caught_up_through=self.today)], [], [], [], []]
+        db.scalar.return_value = None
         with patch.object(service, "utc_today", return_value=self.today):
             feed = service.release_feed(db, uuid4(), "en-US")
         self.assertEqual(feed.caught_up, [])
@@ -197,6 +206,89 @@ class ReleaseContracts(TestCase):
         self.assertEqual(len(feed.upcoming), 1)
         db.execute.assert_not_called()
         db.commit.assert_not_called()
+
+    def test_only_bookmarks_history_or_effective_watched_episodes_keep_next_active(self) -> None:
+        """Unwatch-all stops following unless another visible source remains."""
+        owner = uuid4()
+        db = MagicMock()
+        db.scalars.return_value.all.return_value = []  # no exclusions
+        db.scalar.return_value = None
+        for cutoff in (date.min, self.today):
+            overrides = {(1, 1): False, (1, 3): False, (1, 5): False}
+            activity = OwnerActivity({42: cutoff}, {42: overrides}, set(), set())
+            with patch.object(service, "owner_activity", return_value=activity), patch.object(service, "utc_today", return_value=self.today):
+                feed = service.release_feed(db, owner, "en-US")
+                self.assertEqual((feed.to_watch, feed.upcoming, feed.caught_up), ([], [], []))
+                activity.bookmarks.add(("tv", 42))
+                feed = service.release_feed(db, owner, "en-US")
+                self.assertEqual(feed.to_watch[0].episode.episode_number, 1)
+                self.assertEqual(feed.to_watch[0].watched_episodes, 0)
+                activity.bookmarks.clear()
+                activity.overrides[42][(1, 3)] = True
+                feed = service.release_feed(db, owner, "en-US")
+                self.assertEqual(feed.to_watch[0].watched_episodes, 1)
+                self.assertEqual(feed.to_watch[0].episode.episode_number, 1)
+        db.commit.assert_not_called()
+
+    def test_watched_movie_bookmark_does_not_leak_into_either_section(self) -> None:
+        """Movie and TV identities remain independent for shared numerical IDs."""
+        activity = OwnerActivity({}, {}, {("movie", 42), ("tv", 42)}, {("movie", 42)})
+        db = MagicMock()
+        db.scalars.return_value.all.return_value = []
+        db.scalar.return_value = None
+        with patch.object(service, "owner_activity", return_value=activity), patch.object(service, "utc_today", return_value=self.today):
+            feed = service.release_feed(db, uuid4(), "en-US")
+        self.assertEqual([entry.media_type for entry in feed.to_watch], ["tv"])
+        self.assertEqual([entry.media_type for entry in feed.upcoming], ["tv"])
+
+    def test_old_clients_keep_the_episode_only_contract_until_app_activation(self) -> None:
+        """An API-first rollout must not send movie cards to an older PWA parser."""
+        self.episodes["/movie/42"]["release_date"] = self.today.isoformat()
+        activity = OwnerActivity({}, {}, {("movie", 42), ("tv", 42)}, set())
+        db = MagicMock()
+        db.scalars.return_value.all.return_value = []
+        db.scalar.return_value = None
+        with patch.object(service, "owner_activity", return_value=activity), patch.object(service, "utc_today", return_value=self.today):
+            legacy = service.release_feed(db, uuid4(), "en-US", activity_model=False)
+            self.assertEqual(legacy.to_watch, [])
+            self.assertEqual([entry.media_type for entry in legacy.upcoming], ["tv"])
+            self.assertFalse(legacy.upcoming[0].tracked)
+            updated = service.release_feed(db, uuid4(), "en-US")
+            self.assertEqual({entry.media_type for entry in updated.to_watch}, {"tv", "movie"})
+
+    def test_viewed_projects_partial_activity_without_history_or_dates(self) -> None:
+        """Exclusions affect Next only; bookmark-only and false-only shows are not Viewed."""
+        owner = uuid4()
+        db = MagicMock()
+        db.scalar.return_value = None
+        activity = OwnerActivity({42: date.min}, {42: {(1, 3): True}}, set(), set())
+        with patch.object(service, "owner_activity", return_value=activity), patch.object(service, "utc_today", return_value=self.today):
+            result = service.viewed_shows(db, owner, "en-US")
+            self.assertEqual(result.user_id, owner)
+            self.assertEqual(len(result.shows), 1)
+            self.assertEqual((result.shows[0].watched_episodes, result.shows[0].aired_episodes, result.shows[0].status), (1, 3, "in_progress"))
+            self.assertNotIn("recorded_at", result.shows[0].model_dump())
+            self.assertNotIn("runtime", result.shows[0].model_dump())
+            activity.overrides[42][(1, 3)] = False
+            activity.bookmarks.add(("tv", 42))
+            self.assertEqual(service.viewed_shows(db, owner, "en-US").shows, [])
+            activity.cutoffs[42] = self.today
+            self.assertEqual(service.viewed_shows(db, owner, "en-US").shows[0].status, "in_progress")
+            activity.overrides.clear()
+            self.assertEqual(service.viewed_shows(db, owner, "en-US").shows[0].status, "caught_up")
+            self.details["status"] = "Ended"
+            self.assertEqual(service.viewed_shows(db, owner, "en-US").shows[0].status, "caught_up")  # announced future episodes
+            self.episodes["/tv/42/season/2"] = {"episodes": []}
+            self.assertEqual(service.viewed_shows(db, owner, "en-US").shows[0].status, "completed")
+        db.commit.assert_not_called()
+        db.execute.assert_not_called()
+
+    def test_notification_activity_count_matches_next_with_negative_overrides(self) -> None:
+        """Unknown/future/special children never establish positive viewing activity."""
+        payload = {**self.details, "season/1": self.episodes["/tv/42/season/1"], "season/2": self.episodes["/tv/42/season/2"],
+                   "season/0": {"episodes": [{"episode_number": 1, "air_date": "2020-01-01"}]}}
+        self.assertEqual(watched_regular_count(payload, date.min, {(1, 3): True, (2, 1): True}, self.today), 1)
+        self.assertEqual(watched_regular_count(payload, self.today, {(1, 1): False, (1, 3): False, (1, 5): False}, self.today), 0)
 
 
 class ProgressApiContracts(TestCase):
@@ -219,6 +311,7 @@ class ProgressApiContracts(TestCase):
     def test_anonymous_cannot_read_or_write(self) -> None:
         """Private progress is not public viewing history."""
         self.assertEqual(self.client.get("/api/v1/up-next").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/up-next/viewed").status_code, 403)
         self.assertEqual(self.client.put("/api/v1/up-next/shows/42/episodes", json={"season_number": 1, "episode_number": 1}).status_code, 403)
         self.db.scalars.assert_not_called()
         self.db.execute.assert_not_called()
@@ -228,6 +321,10 @@ class ProgressApiContracts(TestCase):
         self.authenticate()
         self.db.scalars.return_value.all.return_value = []
         response = self.client.get(f"/api/v1/up-next?user_id={uuid4()}&language=fr-FR")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user_id"], str(self.owner))
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        response = self.client.get(f"/api/v1/up-next/viewed?user_id={uuid4()}&language=fr-FR")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user_id"], str(self.owner))
         self.assertEqual(response.headers["cache-control"], "private, no-store")
