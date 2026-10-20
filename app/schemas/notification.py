@@ -22,6 +22,7 @@ class NotificationSettingsInput(BaseModel):
     """One daily digest schedule in an explicit IANA timezone."""
     model_config = ConfigDict(extra="forbid")
     enabled: bool = Field(strict=True)
+    show_details: bool = Field(default=False, strict=True, description="Opt in to media titles and episode codes on lock screens for all subscribed devices.")
     timezone: str = Field(max_length=64)
     delivery_time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     language: Literal["en-US", "fr-FR"]

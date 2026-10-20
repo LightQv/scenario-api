@@ -51,7 +51,9 @@ class NotificationContracts(TestCase):
         """Reject unknown zones, invalid time/keys and undocumented input fields."""
         values = dict(enabled=True, timezone="Europe/Paris", delivery_time="09:00", language="en-US")
         NotificationSettingsInput(**values)
-        for changes in [dict(timezone="Mars/Olympus"), dict(delivery_time="24:00"), dict(enabled="true"), dict(language="xx"), dict(extra="x")]:
+        self.assertFalse(NotificationSettingsInput(**values).show_details)
+        self.assertTrue(NotificationSettingsInput(**values, show_details=True).show_details)
+        for changes in [dict(timezone="Mars/Olympus"), dict(delivery_time="24:00"), dict(enabled="true"), dict(show_details="true"), dict(language="xx"), dict(extra="x")]:
             with self.assertRaises(ValidationError):
                 NotificationSettingsInput(**{**values, **changes})
         key = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
@@ -109,7 +111,7 @@ class NotificationContracts(TestCase):
             service.send_push(subscription, "fr-FR", "2026-10-20")
         data = json.loads(send.call_args.kwargs["data"])
         self.assertEqual(set(data), {"title", "body", "tag"})
-        self.assertEqual(data["title"], "Scenario")
+        self.assertEqual(data["title"], "Sorties du jour")
         self.assertFalse(send.call_args.kwargs["requests_session"].trust_env)
         self.assertEqual(send.call_args.kwargs["timeout"], 10)
 
@@ -130,3 +132,55 @@ class NotificationContracts(TestCase):
         self.assertIn("vapid", request.kwargs["headers"]["Authorization"])
         self.assertEqual(request.kwargs["headers"]["content-encoding"], "aes128gcm")
         self.assertNotIn(b"Your release-day summary", request.kwargs["data"])
+        with patch.object(service, "settings", config), patch.object(service.PushSession, "request", return_value=response) as transport:
+            self.assertEqual(service.send_push(subscription, "en-US", "2026-10-20", releases=[{"title": "Private fixture show", "episode": "S04 E01"}]), 201)
+        self.assertNotIn(b"Private fixture show", transport.call_args.kwargs["data"])
+
+    def test_details_payload_is_bounded_and_test_notifications_stay_generic(self) -> None:
+        """Only an explicitly supplied release list enters the encrypted provider payload."""
+        import json
+        notices = [{"title": "Private\nshow\u202e" + "🎬" * 150, "episode": "S04 E01"}] * 20
+        subscription = MagicMock()
+        with patch.object(service.SubscriptionInput, "model_validate_json", return_value=subscription), patch.object(service, "webpush") as push:
+            service.send_push("fixture", "en-US", "2026-10-20", releases=notices)
+            data = json.loads(push.call_args.kwargs["data"])
+            self.assertTrue(data["show_details"])
+            self.assertEqual(data["remaining"], 17)
+            self.assertEqual(len(data["releases"]), 3)
+            self.assertEqual(data["releases"][0]["episode"], "S04 E01")
+            self.assertLessEqual(len(data["releases"][0]["title"]), 80)
+            self.assertNotIn("\n", data["releases"][0]["title"])
+            self.assertNotIn("\u202e", data["releases"][0]["title"])
+            self.assertLess(len(push.call_args.kwargs["data"].encode()), 3000)
+            for language, title in [("en-US", "Notification test"), ("fr-FR", "Test de notification")]:
+                service.send_push("fixture", language, "test", releases=notices)
+                data = json.loads(push.call_args.kwargs["data"])
+                self.assertEqual(data["title"], title)
+                self.assertNotIn("releases", data)
+                self.assertNotIn("show_details", data)
+
+    def test_details_use_same_owner_eligibility_and_keep_movie_tv_identity(self) -> None:
+        """Detailed summaries exclude foreign, watched, excluded, pending and non-today entries."""
+        day = date(2026, 10, 20)
+        owner = uuid4()
+        def tv(identity: int) -> SimpleNamespace:
+            return SimpleNamespace(media_type="tv", tmdb_id=identity, payload={"name": f"Show {identity}", "seasons": [{"season_number": 0}, {"season_number": 1}, {"season_number": 1}],
+                "season/0": {"episodes": [{"episode_number": 1, "air_date": day.isoformat()}]},
+                "season/1": {"episodes": [{"episode_number": number, "air_date": air} for number, air in [(1, day.isoformat()), (2, day.isoformat()), (3, "2026-10-19"), (4, "2026-10-21"), (5, None)]]}})
+        def scalars() -> list[list]:
+            return [
+                [SimpleNamespace(tmdb_id=identity, caught_up_through=date.min) for identity in [42, 43, 44]],
+                [43], [44], [SimpleNamespace(tmdb_id=42, season_number=1, episode_number=2, watched=True)],
+                [42, 45], [45],
+                [SimpleNamespace(media_type="movie", tmdb_id=42, payload={"title": "Movie 42", "release_date": day.isoformat()}),
+                 SimpleNamespace(media_type="movie", tmdb_id=45, payload={"title": "Watched movie", "release_date": day.isoformat()}),
+                 tv(42), tv(43), tv(44), tv(99)],
+            ]
+        db = MagicMock()
+        db.scalars.side_effect = scalars()
+        self.assertEqual(service.release_notices_today(db, owner, "en-US", day), [
+            {"title": "Movie 42", "episode": None}, {"title": "Show 42", "episode": "S01 E01"},
+        ])
+        db.scalars.side_effect = scalars()
+        self.assertFalse(service.releases_today(db, owner, "en-US", date(2026, 10, 22)))
+        db.commit.assert_not_called()

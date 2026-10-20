@@ -265,16 +265,26 @@ its repair is outside this feature.
 
 ---
 
-### Release notifications (migration 0021)
+### Release notifications (migrations 0021–0022)
 
 Owner-private `/api/v1/notifications` GET/PUT and `/device` PUT/DELETE plus `/test`
 POST implement opt-in daily release summaries. Writes require the authenticated
 cookie and matching `X-Scenario-Owner`. Preferences default off; each browser must
 separately grant permission. Only today's unwatched regular tracked episodes and
-bookmarked unwatched movies qualify; no history/progress is changed. Payloads are
-generic and contain no media titles/account identifiers.
+bookmarked unwatched movies qualify; no qualifying release means no automatic
+notification, and no history/progress is changed. Payloads are generic by default.
+The separate account-wide `show_details` consent allows up to three bounded media
+titles/episode codes plus a remaining-release count on device lock screens. No
+account identifiers or title snapshots are retained in the outbox. Eligibility
+and the current consent are checked again before each send/retry; turning details
+off cannot recall already delivered notifications. Manual tests remain generic.
+Meaningful localized notification titles replace the repeated app name.
 
-Apply additive migration `0021` (`t0u1v2w3x4y5`) before starting compatible code.
+Apply additive migrations `0021` (`t0u1v2w3x4y5`) and `0022`
+(`u1v2w3x4y5z6`) before starting compatible code. The latter adds only
+`show_details NOT NULL DEFAULT false`, preserving existing opt-ins and all other
+preferences/devices/receipts. Older clients omitting the field leave it unchanged.
+The details enhancement is local implementation, not evidence of a new deployment.
 Configure server-only `WEB_PUSH_ENABLED`, `WEB_PUSH_PRIVATE_KEY`,
 `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_SUBJECT`, and the existing integration encryption
 key. Only the public VAPID key is returned to authenticated browsers. Keep private

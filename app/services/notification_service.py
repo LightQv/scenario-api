@@ -2,8 +2,9 @@
 
 import hashlib
 import json
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypedDict
 from time import monotonic
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -42,6 +43,7 @@ def preference_state(db: Session, owner: UUID) -> NotificationSettingsState:
     row: NotificationPreference | None = db.get(NotificationPreference, owner)
     return NotificationSettingsState(
         user_id=owner, enabled=row.enabled if row else False,
+        show_details=row.show_details if row else False,
         timezone=row.timezone if row else "Europe/Paris",
         delivery_time=row.delivery_time if row else "09:00",
         language=row.language if row else "en-US",
@@ -60,7 +62,7 @@ def save_preferences(db: Session, owner: UUID, payload: NotificationSettingsInpu
     if row is None:
         row = NotificationPreference(user_id=owner)
         db.add(row)
-    for key, value in payload.model_dump().items():
+    for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     if not payload.enabled:
         devices = select(PushSubscription.id).where(PushSubscription.user_id == owner)
@@ -111,8 +113,21 @@ class PushSession(requests.Session):
         return super().request(method, url, **kwargs)
 
 
-def send_push(subscription: str, language: str, tag: str, ttl: int = 3600) -> int:
-    """Send a generic encrypted message; disclose no titles/account on lock screens.
+class ReleaseNotice(TypedDict):
+    """Transient release display copy, never persisted in the outbox."""
+
+    title: str
+    episode: str | None
+
+
+def notification_title(value: str) -> str:
+    """Bound display titles and remove control/bidi characters and line breaks."""
+    collapsed: str = " ".join(value.split())
+    return "".join(char for char in collapsed if not unicodedata.category(char).startswith("C"))[:80] or "…"
+
+
+def send_push(subscription: str, language: str, tag: str, ttl: int = 3600, releases: list[ReleaseNotice] | None = None) -> int:
+    """Encrypt a generic summary or explicitly opted-in bounded release details.
 
     Returns:
         Provider HTTP status, including expired subscriptions. Transport errors
@@ -120,17 +135,22 @@ def send_push(subscription: str, language: str, tag: str, ttl: int = 3600) -> in
     """
     payload: SubscriptionInput = SubscriptionInput.model_validate_json(subscription)
     french: bool = language == "fr-FR"
-    data: dict[str, str] = {
-        "title": "Scenario",
+    data: dict[str, Any] = {
+        "title": ("Test de notification" if french else "Notification test") if tag == "test" else
+                 ("Sorties du jour" if french else "Today's releases"),
         "body": ("Votre résumé des sorties du jour est prêt." if french else "Your release-day summary is ready.") if tag != "test" else
                 ("Les notifications sont activées sur cet appareil." if french else "Notifications are working on this device."),
         "tag": f"scenario-release-{tag}",
     }
+    if releases and tag != "test":
+        data.update(show_details=True, language=language, releases=[
+            {"title": notification_title(item["title"]), "episode": item["episode"]} for item in releases[:3]
+        ], remaining=len(releases) - min(3, len(releases)))
     with PushSession() as session:
         session.trust_env = False
         try:
             response: requests.Response | str = webpush(
-                subscription_info=payload.model_dump(exclude_none=True), data=json.dumps(data),
+                subscription_info=payload.model_dump(exclude_none=True), data=json.dumps(data, ensure_ascii=False),
                 vapid_private_key=settings.WEB_PUSH_PRIVATE_KEY,
                 vapid_claims={"sub": settings.WEB_PUSH_SUBJECT}, timeout=10, ttl=ttl,
                 requests_session=session,
@@ -173,23 +193,29 @@ def test_subscription(db: Session, owner: UUID, endpoint: str) -> None:
         raise HTTPException(503, "Push provider did not accept the test")
 
 
-def episode_releases_today(payload: dict[str, Any], day: date, cutoff: date, overrides: dict[tuple[int, int], bool]) -> bool:
-    """Select today's unwatched regular episodes, including explicit false overrides."""
+def episode_numbers_today(payload: dict[str, Any], day: date, cutoff: date, overrides: dict[tuple[int, int], bool]) -> list[tuple[int, int]]:
+    """Select distinct unwatched regular releases, including explicit false overrides."""
+    numbers: set[tuple[int, int]] = set()
     for season in payload.get("seasons", []):
         number: int = season.get("season_number", 0)
-        if not isinstance(number, int) or number <= 0:
+        if type(number) is not int or not 0 < number <= 999999:
             continue
         for episode in payload.get(f"season/{number}", {}).get("episodes", []):
             ep: int = episode.get("episode_number", 0)
-            if not isinstance(ep, int) or ep <= 0 or parsed_date(episode.get("air_date")) != day:
+            if type(ep) is not int or not 0 < ep <= 999999 or parsed_date(episode.get("air_date")) != day:
                 continue
             if not overrides.get((number, ep), day <= cutoff):
-                return True
-    return False
+                numbers.add((number, ep))
+    return sorted(numbers)
 
 
-def releases_today(db: Session, owner: UUID, language: str, day: date) -> bool:
-    """Read catalogues only; never call TMDB, change progress or notify backlog."""
+def episode_releases_today(payload: dict[str, Any], day: date, cutoff: date, overrides: dict[tuple[int, int], bool]) -> bool:
+    """Check release eligibility without counting specials, future dates or backlog."""
+    return bool(episode_numbers_today(payload, day, cutoff, overrides))
+
+
+def release_notices_today(db: Session, owner: UUID, language: str, day: date) -> list[ReleaseNotice]:
+    """Read eligible owner-bound releases from catalogues, without writes or TMDB."""
     progress = {row.tmdb_id: row.caught_up_through for row in db.scalars(select(ShowProgress).where(ShowProgress.user_id == owner))}
     excluded = set(db.scalars(select(ShowExclusion.tmdb_id).where(ShowExclusion.user_id == owner)))
     pending = set(db.scalars(select(ProgressAction.tmdb_id).where(ProgressAction.user_id == owner, ProgressAction.status == "pending")))
@@ -201,18 +227,25 @@ def releases_today(db: Session, owner: UUID, language: str, day: date) -> bool:
     )))
     movies -= set(db.scalars(select(View.tmdb_id).where(View.viewer_id == owner, View.media_type == "movie")))
     # Compact stored catalogues are shared public data; all private selectors above are owner-bound.
-    for catalog in db.scalars(select(ReleaseCatalog).where(ReleaseCatalog.language == language, ReleaseCatalog.payload.is_not(None))):
+    notices: list[ReleaseNotice] = []
+    for catalog in db.scalars(select(ReleaseCatalog).where(ReleaseCatalog.language == language, ReleaseCatalog.payload.is_not(None)).order_by(ReleaseCatalog.media_type, ReleaseCatalog.tmdb_id)):
         payload: dict[str, Any] = catalog.payload or {}
         if catalog.media_type == "movie" and catalog.tmdb_id in movies and parsed_date(payload.get("release_date")) == day:
-            return True
+            notices.append({"title": notification_title(payload.get("title") or ("Film" if language == "fr-FR" else "Movie")), "episode": None})
         if catalog.media_type == "tv" and catalog.tmdb_id in progress and catalog.tmdb_id not in excluded | pending:
-            if episode_releases_today(payload, day, progress[catalog.tmdb_id], overrides.get(catalog.tmdb_id, {})):
-                return True
-    return False
+            title: str = notification_title(payload.get("name") or ("Série" if language == "fr-FR" else "TV show"))
+            for season, episode in episode_numbers_today(payload, day, progress[catalog.tmdb_id], overrides.get(catalog.tmdb_id, {})):
+                notices.append({"title": title, "episode": f"S{season:02d} E{episode:02d}"})
+    return notices
+
+
+def releases_today(db: Session, owner: UUID, language: str, day: date) -> bool:
+    """Keep no-release days silent with the same selectors as detailed summaries."""
+    return bool(release_notices_today(db, owner, language, day))
 
 
 def process_notifications(db: Session, now: datetime) -> None:
-    """Queue/send one generic daily summary per device, under PostgreSQL locks.
+    """Queue/send one eligible daily summary per device, under PostgreSQL locks.
 
     A bounded sender holds a row lock through each provider request. A crash after
     provider acceptance may redeliver; a stable browser tag coalesces that case.
@@ -273,9 +306,12 @@ def process_notifications(db: Session, now: datetime) -> None:
         pref = db.scalar(select(NotificationPreference).where(
             NotificationPreference.user_id == device.user_id,
         )) if device else None
+        notices: list[ReleaseNotice] = release_notices_today(db, device.user_id, pref.language, job.local_date) if (
+            pref is not None and pref.enabled and now.astimezone(ZoneInfo(pref.timezone)).date() == job.local_date
+        ) else []
         if pref is None or not pref.enabled or now.astimezone(ZoneInfo(pref.timezone)).date() != job.local_date:
             job.status = "cancelled"
-        elif not releases_today(db, device.user_id, pref.language, job.local_date):
+        elif not notices:
             job.status = "cancelled"
         else:
             job.attempts += 1
@@ -283,7 +319,8 @@ def process_notifications(db: Session, now: datetime) -> None:
             midnight: datetime = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), ZoneInfo(pref.timezone))
             ttl: int = max(1, min(86400, int((midnight - now).total_seconds())))
             try:
-                code: int = send_push(IntegrationSecretCipher().decrypt(device.encrypted_subscription) or "", pref.language, job.local_date.isoformat(), ttl)
+                code: int = send_push(IntegrationSecretCipher().decrypt(device.encrypted_subscription) or "", pref.language, job.local_date.isoformat(), ttl,
+                                      releases=notices if pref.show_details else None)
             except Exception:
                 code = 503
             if code in (404, 410):

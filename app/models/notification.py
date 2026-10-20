@@ -15,6 +15,7 @@ class NotificationPreference(Base):
     __tablename__ = "notification_preference"
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user_model.id", ondelete="CASCADE"), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    show_details: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Europe/Paris")
     delivery_time: Mapped[str] = mapped_column(String(5), nullable=False, default="09:00")
     language: Mapped[str] = mapped_column(String(5), nullable=False, default="en-US")
