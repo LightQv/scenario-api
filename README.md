@@ -265,7 +265,37 @@ its repair is outside this feature.
 
 ---
 
-### Local viewing-activity follow-up (not deployed)
+### Viewing-activity release · 2026-10-20
+
+Deployed **16:16 UTC** from
+`58b12282eef590bf37e55e27fb0aac914d19edc4` after successful
+[publication 39455401780](https://github.com/LightQv/scenario-api/actions/runs/39455401780).
+Immutable digest:
+`sha256:b3bb14aa0dad9d90bab4519fb63129d7a28c72e7bfef6f6219450fe94437bd08`;
+running AMD64 image:
+`sha256:b8dd10f570d0b8bff5fe7e8f4b1771080c4c46edad84de6c5aeca1a7a0170b86`.
+All **123** tracked application/runtime files matched the candidate image.
+The protected production backup was fully restored on an internal-only disposable
+PostgreSQL network; startup, Alembic no-op and EN/FR feed/Viewed/notification
+projections for restored accounts preserved all **19** table fingerprints,
+including `alembic_version`. No external requests or real push transport were
+possible. Live startup preserved all private-table fingerprints; the public
+catalogue scheduler retains its normal refresh behavior. Schema stays at **0022**.
+The first rehearsal hit an output-parser error after projection checks and safely
+restored the old runtime; parsing the final JSON line corrected the operator script,
+then the full rehearsal and cutover passed without application-source changes.
+
+Base Compose, **5001:8000**, stable push/JWT/integration keys, HTTPS origin/CORS,
+`DEBUG=false`, mode-600 `web-push.env` and unrelated containers were preserved.
+Anonymous private-route rejection and the new activity query/Viewed OpenAPI
+contracts passed. No authenticated production writes or test pushes were used.
+Current rollback is the previous `c38ff0711e192d2bf16d34fb479fa11d175aa837`
+image `sha256:37b9e907f92a4c8e089edee1ccbe0c725aabffdd4e932919e10ac2baf27262c2`,
+local tag `vivianquerenet/scenario:api-rollback`. Retain schema 0022 and the saved
+`web-push.env` overlay on rollback. Backup/checksum/Compose/receipts are server-local
+under `backups/current-rollback/`; older evidence remains under `pre-activity-*`.
+These are not off-host disaster-recovery backups. Frontend cutover evidence belongs
+in the sibling PWA's `docs/DEPLOYMENT_AUDIT.md`; installed-iPhone acceptance is separate.
 
 Updated clients request `GET /api/v1/up-next?activity=true`. Next derives TV
 eligibility from PENDING system Bookmarks, whole-show history or effective watched
@@ -292,8 +322,8 @@ PostgreSQL progress/notification/activity rehearsals. The new lifecycle rehearsa
 is `.venv/bin/python scripts/test_viewing_activity_postgres.py`; it verifies
 bookmark/episode/season/show/removal transitions, negative overrides, exclusions,
 movie/TV collisions, owner isolation and unchanged original history/statistics
-inputs without configured databases, TMDB or real push transport. These checks do
-not replace a protected production-backup restore rehearsal before deployment.
+inputs without configured databases, TMDB or real push transport. The separate
+protected production-backup restore rehearsal also passed as recorded above.
 
 ### Release notifications (migrations 0021–0022)
 
@@ -331,7 +361,7 @@ isolated Tailscale HTTPS and physical-iPhone acceptance boundaries are documente
 in the sibling PWA's `docs/NOTIFICATIONS.md`. This section describes the
 implementation and platform boundaries, not a claim of physical-device acceptance.
 
-The release-details update deployed on **2026-10-20 at 13:34 UTC** from
+The previous release-details update deployed on **2026-10-20 at 13:34 UTC** from
 `c38ff0711e192d2bf16d34fb479fa11d175aa837` after successful
 [API publication 39427892800](https://github.com/LightQv/scenario-api/actions/runs/39427892800).
 API digest: `sha256:df4d373f74715f9a66a5b8df18ab28ec9457fa07964fad6907244448f9653aec`;
@@ -350,7 +380,7 @@ authenticated account mutation was used for acceptance. Frontend `6738184` deplo
 after its exact-commit checks (473 browser tests) and publisher passed; see its
 `docs/DEPLOYMENT_AUDIT.md` for full evidence and physical-device limits.
 
-Current API rollback retains `7de3454`, image
+The release-details rollout's historical API rollback retained `7de3454`, image
 `sha256:a7f608bace170dcec43dd6b38f673e1ad4cc4280446410f685a8ae50764515bf`,
 as local `vivianquerenet/scenario:api-rollback`. Keep additive schema on runtime
 rollback; the saved override bypasses the old image's unresolvable 0022 Alembic
