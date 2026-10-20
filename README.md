@@ -284,7 +284,7 @@ Apply additive migrations `0021` (`t0u1v2w3x4y5`) and `0022`
 (`u1v2w3x4y5z6`) before starting compatible code. The latter adds only
 `show_details NOT NULL DEFAULT false`, preserving existing opt-ins and all other
 preferences/devices/receipts. Older clients omitting the field leave it unchanged.
-The details enhancement is local implementation, not evidence of a new deployment.
+See the verified release below for deployed source and acceptance boundaries.
 Configure server-only `WEB_PUSH_ENABLED`, `WEB_PUSH_PRIVATE_KEY`,
 `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_SUBJECT`, and the existing integration encryption
 key. Only the public VAPID key is returned to authenticated browsers. Keep private
@@ -301,7 +301,35 @@ isolated Tailscale HTTPS and physical-iPhone acceptance boundaries are documente
 in the sibling PWA's `docs/NOTIFICATIONS.md`. This section describes the
 implementation and platform boundaries, not a claim of physical-device acceptance.
 
-The release deployed on 2026-10-19 from `7de3454` after successful
+The release-details update deployed on **2026-10-20 at 13:34 UTC** from
+`c38ff0711e192d2bf16d34fb479fa11d175aa837` after successful
+[API publication 39427892800](https://github.com/LightQv/scenario-api/actions/runs/39427892800).
+API digest: `sha256:df4d373f74715f9a66a5b8df18ab28ec9457fa07964fad6907244448f9653aec`;
+running AMD64 image: `sha256:37b9e907f92a4c8e089edee1ccbe0c725aabffdd4e932919e10ac2baf27262c2`.
+All 121 tracked application/runtime files matched the image. The existing publisher
+has no test stage; 67 local hermetic contracts (including real encryption/fake
+transport), targeted Pylint and isolated PostgreSQL migration/concurrency checks
+passed separately. Full production backup restore, candidate migration/startup and
+production 0021→0022 migration preserved original-column fingerprints for all 18
+tables, including preferences/devices/receipts; startup also preserved them.
+Existing details consent is false. Base Compose/ports/network and the extra
+`web-push.env` overlay, stable keys, HTTPS origin/CORS and Secure-cookie settings
+were retained. Unrelated containers were unchanged. Health, anonymous private-route
+rejection and the API schema's default-off consent passed; no real test push or
+authenticated account mutation was used for acceptance. Frontend `6738184` deployed
+after its exact-commit checks (473 browser tests) and publisher passed; see its
+`docs/DEPLOYMENT_AUDIT.md` for full evidence and physical-device limits.
+
+Current API rollback retains `7de3454`, image
+`sha256:a7f608bace170dcec43dd6b38f673e1ad4cc4280446410f685a8ae50764515bf`,
+as local `vivianquerenet/scenario:api-rollback`. Keep additive schema on runtime
+rollback; the saved override bypasses the old image's unresolvable 0022 Alembic
+hook, runs Uvicorn directly and retains `web-push.env`. Restore-tested backup,
+checksum, Compose/overrides and fingerprints are in `backups/current-rollback/`;
+older receipts remain under timestamped `pre-release-details-*` directories.
+Later evidence-only commits do not change the deployed runtime source identity.
+
+The previous release deployed on 2026-10-19 from `7de3454` after successful
 [API publication 39315357440](https://github.com/LightQv/scenario-api/actions/runs/39315357440)
 and exact-commit frontend checks/publication. Immutable API digest:
 `sha256:ad5f69a9677ec6c20408a54b4527a47f90fb36db7f084245b1225a051b17deac`.
@@ -317,7 +345,7 @@ origins, and `DEBUG=false` for Secure cookies. Both original base Compose files 
 the original API `.env` remain unchanged. **Keep the API candidate override's extra
 `web-push.env` on subsequent recreates/releases**, or Web Push/HTTPS flags revert to
 old defaults. Keys are stable and server-only (mode 600). The retained old API image
-cannot resolve migration 0021: the saved rollback override bypasses its Alembic
+cannot resolve migration 0022: the saved rollback override bypasses its Alembic
 entrypoint and starts the compatible Uvicorn app directly. Retain additive schema;
 do not delete users' notification/progress data just to roll back code. Full receipts
 and restore-tested backup remain in `backups/current-rollback/`; older release
